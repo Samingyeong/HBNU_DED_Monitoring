@@ -13,12 +13,12 @@ function App() {
   };
 
   return (
-    <div className="h-screen bg-gray-100 flex flex-col">
+    <div className="h-screen bg-gray-100 flex flex-col justify-center items-center p-1">
       {/* Header */}
       <Header emergency={emergency} onEmergencyToggle={handleEmergencyToggle} />
       
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden w-[95%] mt-8">
         {/* Left Panel - CNC Status & Connection Status */}
         <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
           <div className="flex-1 overflow-hidden">
@@ -54,7 +54,7 @@ function App() {
       </div>
       
       {/* Bottom Bar */}
-      <div className="h-12 bg-white border-t border-gray-200 flex items-center justify-between px-6">
+      <div className="h-12 bg-white border-t border-gray-200 flex items-center justify-between px-6 w-[95%] mt-8 rounded-lg shadow-sm">
         <div className="text-sm text-gray-500">
           Copyright by KITECH V2.0
         </div>

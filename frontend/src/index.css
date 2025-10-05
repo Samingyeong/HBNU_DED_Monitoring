@@ -1,6 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@font-face {
+  font-family: 'Expo M';
+  src: url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  font-weight: 400;
+  font-style: normal;
+}
 
 @layer base {
   * {
@@ -11,6 +20,17 @@
     height: 100%;
     margin: 0;
     padding: 0;
+    overflow: hidden;
+  }
+
+  /* 모든 스크롤바 숨기기 */
+  * {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* Internet Explorer 10+ */
+  }
+
+  *::-webkit-scrollbar {
+    display: none; /* WebKit */
   }
 }
 
