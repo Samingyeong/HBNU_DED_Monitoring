@@ -43,7 +43,7 @@ export default function CNCStatus() {
           <div key={axis} className="flex justify-between">
             <span className="text-sm font-medium text-gray-600 uppercase">{axis}:</span>
             <span className="text-sm text-gray-900 font-mono">
-              {cncData[`${prefix}_${axis}` as keyof CNCData].toFixed(2)}
+              {(cncData[`${prefix}_${axis}` as keyof CNCData] as number).toFixed(2)}
             </span>
           </div>
         ))}
