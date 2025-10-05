@@ -13,26 +13,26 @@ function App() {
   };
 
   return (
-    <div className="h-screen bg-gray-100 flex flex-col justify-center items-center p-1">
+    <div className="h-screen bg-gray-100 flex flex-col items-center p-2 overflow-hidden">
       {/* Header */}
       <Header emergency={emergency} onEmergencyToggle={handleEmergencyToggle} />
       
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden w-[95%] mt-8">
+      <div className="flex-1 flex overflow-hidden w-[98%] my-4">
         {/* Left Panel - CNC Status & Connection Status */}
-        <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
-          <div className="flex-1 overflow-hidden">
+        <div className="w-80 bg-white shadow-lg rounded-2xl flex flex-col">
+          <div className="flex-[2] p-3 rounded-t-2xl">
             <CNCStatus />
           </div>
-          <div className="h-80 border-t border-gray-200 overflow-hidden">
+          <div className="flex-[1] border-t border-gray-200 p-2 rounded-b-2xl">
             <ConnectionStatus />
           </div>
         </div>
-        
+    
         {/* Right Panel - Camera View & Charts */}
-        <div className="flex-1 flex flex-col p-4 space-y-4">
+        <div className="flex-1 flex flex-col p-3 space-y-2">
           {/* Top Row - Camera View & Melt Pool Area Chart */}
-          <div className="flex space-x-4 h-1/2">
+          <div className="flex space-x-2 h-1/2">
             <div className="flex-1">
               <CameraView />
             </div>
@@ -42,7 +42,7 @@ function App() {
           </div>
           
           {/* Bottom Row - Temperature & Laser Power Charts */}
-          <div className="flex space-x-4 h-1/2">
+          <div className="flex space-x-2 h-1/2">
             <div className="flex-1">
               <Charts chartType="meltpoolTemp" />
             </div>
@@ -54,15 +54,15 @@ function App() {
       </div>
       
       {/* Bottom Bar */}
-      <div className="h-12 bg-white border-t border-gray-200 flex items-center justify-between px-6 w-[95%] mt-8 rounded-lg shadow-sm">
-        <div className="text-sm text-gray-500">
+      <div className="h-8 bg-white border-t border-gray-200 flex items-center justify-between px-4 w-[98%] rounded-xl shadow-sm">
+        <div className="text-xs text-gray-500">
           Copyright by KITECH V2.0
         </div>
-        <div className="flex space-x-3">
-          <button className="btn-primary">
+        <div className="flex space-x-2">
+          <button className="btn-primary text-xs px-3 py-1">
             SAVE
           </button>
-          <button className="btn-secondary">
+          <button className="btn-secondary text-xs px-3 py-1">
             EXIT
           </button>
         </div>
