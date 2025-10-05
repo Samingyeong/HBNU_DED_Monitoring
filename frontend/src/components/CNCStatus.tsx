@@ -55,8 +55,12 @@ export default function CNCStatus() {
     <div className="h-full overflow-y-auto p-4">
       <h2 className="text-xl font-semibold text-gray-900 mb-4">CNC Machine Status</h2>
       
-      <PositionBox title="현재 좌표" prefix="curpos" />
-      <PositionBox title="기계 좌표" prefix="macpos" />
+      {/* 현재 좌표와 기계 좌표를 한 행에 2열로 배치 */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <PositionBox title="현재 좌표" prefix="curpos" />
+        <PositionBox title="기계 좌표" prefix="macpos" />
+      </div>
+      
       <PositionBox title="남은 거리" prefix="rempos" />
       
       <div className="card">
@@ -81,14 +85,6 @@ export default function CNCStatus() {
           <div className="flex justify-between">
             <span className="text-gray-600">Total Time:</span>
             <span className="font-mono">{cncData.total_operating_time}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Emergency:</span>
-            <span className={`px-2 py-1 rounded text-xs font-medium ${
-              cncData.emergency ? 'status-disconnected' : 'status-connected'
-            }`}>
-              {cncData.emergency ? 'ON' : 'OFF'}
-            </span>
           </div>
         </div>
       </div>

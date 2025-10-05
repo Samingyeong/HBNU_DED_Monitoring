@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Header from './components/Header';
 import CNCStatus from './components/CNCStatus';
 import ConnectionStatus from './components/ConnectionStatus';
@@ -6,10 +6,16 @@ import CameraView from './components/CameraView';
 import Charts from './components/Charts';
 
 function App() {
+  const [emergency, setEmergency] = useState(false);
+
+  const handleEmergencyToggle = (newEmergency: boolean) => {
+    setEmergency(newEmergency);
+  };
+
   return (
     <div className="h-screen bg-gray-100 flex flex-col">
       {/* Header */}
-      <Header />
+      <Header emergency={emergency} onEmergencyToggle={handleEmergencyToggle} />
       
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
