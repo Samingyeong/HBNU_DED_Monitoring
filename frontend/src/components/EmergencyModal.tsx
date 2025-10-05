@@ -13,20 +13,27 @@ export default function EmergencyModal({
   emergency, 
   onEmergencyToggle 
 }: EmergencyModalProps) {
-  const [localEmergency, setLocalEmergency] = useState(emergency);
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  const handleEmergencyToggle = () => {
-    const newEmergency = !localEmergency;
-    setLocalEmergency(newEmergency);
-    onEmergencyToggle(newEmergency);
+  const handleEmergencyClick = () => {
+    if (emergency) {
+      // 이미 Emergency 상태라면 바로 해제
+      onEmergencyToggle(false);
+      onClose();
+    } else {
+      // Emergency 활성화 확인
+      setShowConfirm(true);
+    }
   };
 
-  const handleSave = () => {
+  const handleConfirmEmergency = () => {
+    onEmergencyToggle(true);
+    setShowConfirm(false);
     onClose();
   };
 
   const handleCancel = () => {
-    setLocalEmergency(emergency); // 원래 상태로 복원
+    setShowConfirm(false);
     onClose();
   };
 
@@ -34,57 +41,71 @@ export default function EmergencyModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">Emergency 설정</h2>
-            <button
-              onClick={handleCancel}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <div className={`w-4 h-4 rounded-full ${localEmergency ? 'bg-red-500' : 'bg-green-500'}`} />
-                <span className="text-lg font-medium text-gray-900">Emergency 상태</span>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4">
+        <div className="p-8 text-center">
+          {!showConfirm ? (
+            <>
+              <div className="mb-6">
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Emergency</h2>
+                <p className="text-gray-600">
+                  {emergency ? 'Emergency 상태를 해제하시겠습니까?' : 'Emergency를 활성화하시겠습니까?'}
+                </p>
               </div>
-              <button
-                onClick={handleEmergencyToggle}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  localEmergency 
-                    ? 'bg-red-100 text-red-700 hover:bg-red-200' 
-                    : 'bg-green-100 text-green-700 hover:bg-green-200'
-                }`}
-              >
-                {localEmergency ? 'ON' : 'OFF'}
-              </button>
-            </div>
-            
-            <p className="text-sm text-gray-600 mt-3">
-              Emergency가 ON 상태일 때는 모든 기계 동작이 중단됩니다.
-            </p>
-          </div>
 
-          <div className="flex space-x-3">
-            <button
-              onClick={handleSave}
-              className="flex-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors font-medium"
-            >
-              저장
-            </button>
-            <button
-              onClick={handleCancel}
-              className="flex-1 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors font-medium"
-            >
-              취소
-            </button>
-          </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleCancel}
+                  className="flex-1 bg-gray-200 text-gray-800 px-6 py-3 rounded-xl hover:bg-gray-300 transition-colors font-medium"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleEmergencyClick}
+                  className={`flex-1 px-6 py-3 rounded-xl font-medium transition-colors ${
+                    emergency 
+                      ? 'bg-green-500 text-white hover:bg-green-600' 
+                      : 'bg-red-500 text-white hover:bg-red-600'
+                  }`}
+                >
+                  {emergency ? '해제' : 'Emergency'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-6">
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-red-600 mb-2">정말 멈추시겠습니까?</h2>
+                <p className="text-gray-600 mb-4">
+                  Emergency를 활성화하면 모든 센서와 기계 동작이 즉시 중단됩니다.
+                </p>
+              </div>
+
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleCancel}
+                  className="flex-1 bg-gray-200 text-gray-800 px-6 py-3 rounded-xl hover:bg-gray-300 transition-colors font-medium"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleConfirmEmergency}
+                  className="flex-1 bg-red-500 text-white px-6 py-3 rounded-xl hover:bg-red-600 transition-colors font-medium"
+                >
+                  확인
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
