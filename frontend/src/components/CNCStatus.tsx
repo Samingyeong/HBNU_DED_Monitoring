@@ -1,43 +1,55 @@
 import React from 'react';
+import { useSensorData } from '../hooks/useSensorData';
 
 interface CNCData {
-  curpos_x: number;
-  curpos_y: number;
-  curpos_z: number;
-  curpos_a: number;
-  curpos_c: number;
-  macpos_x: number;
-  macpos_y: number;
-  macpos_z: number;
-  macpos_a: number;
-  macpos_c: number;
-  // Feed Rate 데이터
-  feeder1_rpm: number;
-  feeder1_remaining: number;
-  feeder1_status: boolean;
-  feeder2_rpm: number;
-  feeder2_remaining: number;
-  feeder2_status: boolean;
-  feeder3_rpm: number;
-  feeder3_remaining: number;
-  feeder3_status: boolean;
-  // Gas 데이터
-  coaxial_gas: number;
-  feeding_gas: number;
-  shield_gas: number;
+  curpos_x?: number;
+  curpos_y?: number;
+  curpos_z?: number;
+  curpos_a?: number;
+  curpos_c?: number;
+  macpos_x?: number;
+  macpos_y?: number;
+  macpos_z?: number;
+  macpos_a?: number;
+  macpos_c?: number;
+  feed_rate?: number;
+  feed_override?: number;
+  rapid_override?: number;
+  // Feed Rate 데이터 (샘플)
+  feeder1_rpm?: number;
+  feeder1_remaining?: number;
+  feeder1_status?: boolean;
+  feeder2_rpm?: number;
+  feeder2_remaining?: number;
+  feeder2_status?: boolean;
+  feeder3_rpm?: number;
+  feeder3_remaining?: number;
+  feeder3_status?: boolean;
+  // Gas 데이터 (샘플)
+  coaxial_gas?: number;
+  feeding_gas?: number;
+  shield_gas?: number;
 }
 
 export default function CNCStatus() {
-  // 샘플 데이터
-  const cncData: CNCData = {
-    curpos_x: 3.92, curpos_y: 1.50, curpos_z: 6.24, curpos_a: 0.00, curpos_c: 0.00,
-    macpos_x: -105.48, macpos_y: -149.20, macpos_z: -122.71, macpos_a: 0.00, macpos_c: 0.00,
-    // Feed Rate 데이터
-    feeder1_rpm: 1200, feeder1_remaining: 85, feeder1_status: true,
-    feeder2_rpm: 800, feeder2_remaining: 92, feeder2_status: false,
-    feeder3_rpm: 1500, feeder3_remaining: 78, feeder3_status: true,
-    // Gas 데이터
-    coaxial_gas: 15.5, feeding_gas: 8.2, shield_gas: 12.8,
+  const { latestData } = useSensorData();
+
+  // 실제 CNC 데이터 또는 기본값
+  const cncData: CNCData = latestData?.cnc_data || {
+    curpos_x: 0, curpos_y: 0, curpos_z: 0, curpos_a: 0, curpos_c: 0,
+    macpos_x: 0, macpos_y: 0, macpos_z: 0, macpos_a: 0, macpos_c: 0,
+    feed_rate: 0, feed_override: 0, rapid_override: 0,
+    // Feed Rate 데이터 (샘플)
+    feeder1_rpm: 0, feeder1_remaining: 0, feeder1_status: false,
+    feeder2_rpm: 0, feeder2_remaining: 0, feeder2_status: false,
+    feeder3_rpm: 0, feeder3_remaining: 0, feeder3_status: false,
+    // Gas 데이터 (샘플)
+    coaxial_gas: 0, feeding_gas: 0, shield_gas: 0,
+  };
+
+  const formatValue = (value: number | undefined, decimals: number = 2): string => {
+    if (value === undefined) return '0.00';
+    return value.toFixed(decimals);
   };
 
   const PositionBox = ({ title, prefix }: { title: string; prefix: 'curpos' | 'macpos' }) => (
@@ -48,7 +60,7 @@ export default function CNCStatus() {
           <div key={axis} className="flex items-center justify-center gap-2">
             <span className="text-xs font-medium text-gray-600 uppercase">{axis}:</span>
             <span className="text-xs text-gray-900 font-mono">
-              {(cncData[`${prefix}_${axis}` as keyof CNCData] as number).toFixed(2)}
+              {formatValue(cncData[`${prefix}_${axis}` as keyof CNCData] as number)}
             </span>
           </div>
         ))}
@@ -115,11 +127,37 @@ export default function CNCStatus() {
             ].map((gas) => (
               <div key={gas.name} className="text-center">
                 <div className="text-xs font-medium text-gray-900 mb-1">{gas.name}</div>
-                <div className="text-sm font-mono text-gray-900">{gas.value}</div>
+                <div className="text-sm font-mono text-gray-900">{formatValue(gas.value)}</div>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Feed Rate 정보 */}
+        <div className="bg-gray-50 p-3 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">Feed Rate</h4>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Feed Rate:</span>
+              <span className="font-medium">{formatValue(cncData.feed_rate, 0)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Feed Override:</span>
+              <span className="font-medium">{formatValue(cncData.feed_override)}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Rapid Override:</span>
+              <span className="font-medium">{formatValue(cncData.rapid_override)}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 마지막 업데이트 시간 */}
+        {latestData?.timestamp && (
+          <div className="mt-3 text-xs text-gray-400 text-center">
+            Last Update: {new Date(latestData.timestamp).toLocaleTimeString()}
+          </div>
+        )}
       </div>
     </div>
   );

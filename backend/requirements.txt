@@ -1,0 +1,23 @@
+# FastAPI 백엔드 의존성
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+python-multipart==0.0.6
+
+# 데이터 처리
+pandas==2.1.4
+numpy==1.24.4
+opencv-python==4.8.1.78
+
+# 기존 센서 통신 의존성 (기존 requirements.txt에서 가져옴)
+pypylon==3.1.0
+pyserial==3.5
+
+# 비동기 처리
+asyncio-mqtt==0.16.1
+
+# 설정 관리
+python-dotenv==1.0.0
+
+# 로깅
+loguru==0.7.2

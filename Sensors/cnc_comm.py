@@ -28,13 +28,13 @@ class CNCCommunication:
             self.address = {key: value for key, value in self.config.items('address')}
         except conf.NoSectionError:
             print(f"INI 파일에 [address] 섹션이 없습니다: {config_path}")
-            sys.exit(1)
+            raise Exception("INI 파일에 [address] 섹션이 없습니다")
 
         try:
             self.hx = ctypes.CDLL(os.path.join(dll_path, "HXApi.dll"))
         except OSError as e:
             print(f"DLL 로드 실패: {e}")
-            sys.exit(1)
+            raise Exception(f"DLL 로드 실패: {e}")
 
         self.api_types()
         self.open()

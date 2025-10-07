@@ -4,12 +4,30 @@ import CNCStatus from './components/CNCStatus';
 import ConnectionStatus from './components/ConnectionStatus';
 import CameraView from './components/CameraView';
 import Charts from './components/Charts';
+import EmergencyModal from './components/EmergencyModal';
 
 function App() {
   const [emergency, setEmergency] = useState(false);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
   const handleEmergencyToggle = (newEmergency: boolean) => {
-    setEmergency(newEmergency);
+    if (newEmergency && !emergency) {
+      // 비상 정지 요청 시 모달 표시
+      setShowEmergencyModal(true);
+    } else {
+      setEmergency(newEmergency);
+    }
+  };
+
+  const handleEmergencyConfirm = () => {
+    setEmergency(true);
+    setShowEmergencyModal(false);
+    // 여기에 실제 비상 정지 로직 추가
+    console.log('🚨 비상 정지 실행됨');
+  };
+
+  const handleEmergencyCancel = () => {
+    setShowEmergencyModal(false);
   };
 
   return (
@@ -56,17 +74,21 @@ function App() {
       {/* Bottom Bar */}
       <div className="h-8 bg-white border-t border-gray-200 flex items-center justify-between px-4 w-[98%] rounded-xl shadow-sm">
         <div className="text-xs text-gray-500">
-          Copyright by KITECH V2.0
+          Copyright by KITECH V2.0 - Backend API Connected
         </div>
         <div className="flex space-x-2">
-          <button className="btn-primary text-xs px-3 py-1">
-            SAVE
-          </button>
-          <button className="btn-secondary text-xs px-3 py-1">
-            EXIT
-          </button>
+          <div className="text-xs text-gray-500">
+            React + Electron + FastAPI
+          </div>
         </div>
       </div>
+
+      {/* Emergency Modal */}
+      <EmergencyModal
+        isOpen={showEmergencyModal}
+        onClose={handleEmergencyCancel}
+        onConfirm={handleEmergencyConfirm}
+      />
     </div>
   );
 }
