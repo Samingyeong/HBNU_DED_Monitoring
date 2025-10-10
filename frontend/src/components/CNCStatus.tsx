@@ -53,9 +53,9 @@ export default function CNCStatus() {
   };
 
   const PositionBox = ({ title, prefix }: { title: string; prefix: 'curpos' | 'macpos' }) => (
-    <div className="bg-gray-50 p-3 rounded-lg">
-      <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">{title}</h4>
-      <div className="space-y-2">
+    <div className="bg-gray-50 p-2 rounded-lg">
+      <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">{title}</h4>
+      <div className="space-y-1">
         {['x', 'y', 'z', 'a', 'c'].map(axis => (
           <div key={axis} className="flex items-center justify-center gap-2">
             <span className="text-xs font-medium text-gray-600 uppercase">{axis}:</span>
@@ -69,9 +69,9 @@ export default function CNCStatus() {
   );
 
   return (
-    <div className="h-full">
+    <div className="h-full flex flex-col">
       {/* 시스템 상태 제목 */}
-      <div className="flex items-center mb-4">
+      <div className="flex items-center mb-2">
         <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-3">
           <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
@@ -80,7 +80,7 @@ export default function CNCStatus() {
         <h3 className="text-sm font-bold text-gray-900">시스템 상태</h3>
       </div>
       
-      <div className="space-y-3">
+      <div className="flex-1 overflow-y-auto space-y-3">
         {/* 현재 좌표와 기계 좌표를 한 행에 2열로 배치 */}
         <div className="grid grid-cols-2 gap-3">
           <PositionBox title="상대좌표/현재좌표" prefix="curpos" />
@@ -133,28 +133,37 @@ export default function CNCStatus() {
           </div>
         </div>
 
-        {/* Feed Rate 정보 */}
+        {/* 센서 연결 상태 */}
         <div className="bg-gray-50 p-3 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">Feed Rate</h4>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Feed Rate:</span>
-              <span className="font-medium">{formatValue(cncData.feed_rate, 0)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Feed Override:</span>
-              <span className="font-medium">{formatValue(cncData.feed_override)}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Rapid Override:</span>
-              <span className="font-medium">{formatValue(cncData.rapid_override)}%</span>
-            </div>
+          <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">센서 연결 상태</h4>
+          <div className="space-y-2">
+            {[
+              { name: 'Basler Camera', key: 'camera' },
+              { name: 'HikRobot-1', key: 'hik_camera_1' },
+              { name: 'HikRobot-2', key: 'hik_camera_2' },
+              { name: '2color Pyrometer', key: 'pyrometer' },
+              { name: 'Laser', key: 'laser' },
+              { name: 'CNC', key: 'cnc' }
+            ].map((sensor) => {
+              const status = (latestData as any)?.systemStatus?.sensors?.[sensor.key] || false;
+              return (
+                <div key={sensor.key} className="flex justify-between items-center text-xs">
+                  <span className="text-gray-700">{sensor.name}</span>
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${status ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                    <span className={status ? 'text-green-600' : 'text-red-600'}>
+                      {status ? 'Connected' : 'Disconnected'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* 마지막 업데이트 시간 */}
         {latestData?.timestamp && (
-          <div className="mt-3 text-xs text-gray-400 text-center">
+          <div className="mt-2 text-xs text-gray-400 text-center">
             Last Update: {new Date(latestData.timestamp).toLocaleTimeString()}
           </div>
         )}

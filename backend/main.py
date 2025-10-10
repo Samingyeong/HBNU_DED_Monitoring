@@ -38,6 +38,7 @@ class SensorData(BaseModel):
 class SaveRequest(BaseModel):
     """데이터 저장 요청 모델"""
     folder_name: str
+    auto_save: Optional[bool] = False
 
 
 # 전역 변수
@@ -164,17 +165,28 @@ async def get_data_history(limit: int = 100):
 
 @app.post("/api/save/start")
 async def start_saving(request: SaveRequest):
-    """데이터 저장 시작"""
+    """데이터 저장 시작 (수동 저장)"""
     if not data_storage:
         raise HTTPException(status_code=503, detail="데이터 스토리지가 초기화되지 않았습니다")
     
     try:
-        save_path = await data_storage.start_saving(request.folder_name)
-        return {
-            "message": "데이터 저장이 시작되었습니다",
-            "save_path": save_path,
-            "timestamp": datetime.now().isoformat()
-        }
+        # 요청에 auto_save 플래그가 있으면 임시 저장으로 처리
+        if hasattr(request, 'auto_save') and request.auto_save:
+            await data_storage.start_temp_storage(request.folder_name)
+            return {
+                "message": "임시 저장이 시작되었습니다",
+                "save_path": f"temp_{request.folder_name}",
+                "timestamp": datetime.now().isoformat(),
+                "is_temp_storage": True
+            }
+        else:
+            save_path = await data_storage.start_saving(request.folder_name)
+            return {
+                "message": "데이터 저장이 시작되었습니다",
+                "save_path": save_path,
+                "timestamp": datetime.now().isoformat(),
+                "is_temp_storage": False
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"저장 시작 실패: {str(e)}")
 
@@ -193,6 +205,48 @@ async def stop_saving():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"저장 중지 실패: {str(e)}")
+
+
+@app.post("/api/save/temp-stop")
+async def stop_temp_saving():
+    """임시 저장 중지 (자동저장 종료 시)"""
+    if not data_storage:
+        raise HTTPException(status_code=503, detail="데이터 스토리지가 초기화되지 않았습니다")
+    
+    try:
+        await data_storage.stop_temp_storage()
+        return {
+            "message": "임시 저장이 중지되었습니다",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"임시 저장 중지 실패: {str(e)}")
+
+
+@app.post("/api/save/temp-to-permanent")
+async def save_temp_to_permanent(request: SaveRequest):
+    """임시 저장된 데이터를 영구 저장으로 이동"""
+    if not data_storage:
+        raise HTTPException(status_code=503, detail="데이터 스토리지가 초기화되지 않았습니다")
+    
+    try:
+        save_path = await data_storage.save_temp_storage_to_permanent(request.folder_name)
+        return {
+            "message": "임시 데이터가 영구 저장되었습니다",
+            "save_path": save_path,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"임시 데이터 영구 저장 실패: {str(e)}")
+
+
+@app.get("/api/save/temp-info")
+async def get_temp_storage_info():
+    """임시 저장 정보 조회"""
+    if not data_storage:
+        raise HTTPException(status_code=503, detail="데이터 스토리지가 초기화되지 않았습니다")
+    
+    return data_storage.get_temp_storage_info()
 
 
 @app.get("/api/save/status")

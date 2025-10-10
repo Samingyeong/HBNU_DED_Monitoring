@@ -6,7 +6,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { useSensorData } from '../hooks/useSensorData';
 
 interface ChartsProps {
-  chartType: 'meltpoolTemp' | 'meltpoolArea' | 'laserPower';
+  chartType: 'meltpoolTemp' | 'meltpoolArea' | 'laserPower' | 'height';
 }
 
 const Charts: React.FC<ChartsProps> = ({ chartType }) => {
@@ -39,6 +39,12 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
             ...baseData,
             outputPower: data.laser_data?.outpower || 0,
             setPower: data.laser_data?.setpower || 0,
+          };
+        
+        case 'height':
+          return {
+            ...baseData,
+            height: (data.camera_data as any)?.height || 0,
           };
         
         default:
@@ -79,6 +85,16 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
             { dataKey: 'setPower', name: 'Set Power', color: '#f97316', stroke: '#f97316', strokeDasharray: '5 5' }
           ],
           yAxisDomain: [0, 1200]
+        };
+      
+      case 'height':
+        return {
+          title: 'Height (CCD)',
+          yAxisLabel: 'Height (mm)',
+          lines: [
+            { dataKey: 'height', name: 'Height', color: '#8b5cf6', stroke: '#8b5cf6' }
+          ],
+          yAxisDomain: [-10, 10]
         };
       
       default:
@@ -181,10 +197,6 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
           )}
         </div>
 
-        {/* 데이터 개수 표시 */}
-        <div className="mt-2 text-xs text-gray-400 text-center">
-          Data Points: {chartData.length}
-        </div>
       </div>
     </div>
   );

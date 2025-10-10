@@ -27,6 +27,12 @@ class DataStorage:
         self.save_folder = None
         self.save_task = None
         
+        # 임시 저장 관련 (자동저장 데이터 보관)
+        self.temp_storage = deque(maxlen=10000)  # 최대 10,000개 데이터 보관
+        self.temp_storage_start_time = None
+        self.temp_storage_session_id = None
+        self.temp_storage_cleanup_task = None
+        
         # 이미지 저장 관련
         self.image_save_dir = None
         self.hik_save_dir = None
@@ -56,6 +62,10 @@ class DataStorage:
             # 저장 중이면 CSV에 추가
             if self.is_saving and self.save_folder:
                 asyncio.create_task(self._save_to_csv_async(normalized_data))
+            
+            # 임시 저장 중이면 임시 스토리지에 추가
+            if self.temp_storage_session_id:
+                self.temp_storage.append(normalized_data)
                 
         except Exception as e:
             print(f"❌ 데이터 저장 오류: {e}")
@@ -334,3 +344,120 @@ class DataStorage:
         except Exception as e:
             print(f"⚠️ HikRobot 이미지 저장 오류: {e}")
             return None
+    
+    async def start_temp_storage(self, session_id: str):
+        """임시 저장 시작 (자동저장 데이터 보관)"""
+        try:
+            self.temp_storage_session_id = session_id
+            self.temp_storage_start_time = datetime.now()
+            self.temp_storage.clear()  # 기존 임시 데이터 초기화
+            
+            # 30분 후 자동 정리 태스크 시작
+            self.temp_storage_cleanup_task = asyncio.create_task(self._temp_storage_cleanup())
+            
+            print(f"📦 임시 저장 시작: {session_id}")
+            
+        except Exception as e:
+            print(f"❌ 임시 저장 시작 실패: {e}")
+            raise Exception(f"임시 저장 시작 실패: {str(e)}")
+    
+    async def stop_temp_storage(self):
+        """임시 저장 중지"""
+        try:
+            if self.temp_storage_cleanup_task:
+                self.temp_storage_cleanup_task.cancel()
+                try:
+                    await self.temp_storage_cleanup_task
+                except asyncio.CancelledError:
+                    pass
+            
+            self.temp_storage_session_id = None
+            self.temp_storage_start_time = None
+            
+            print("📦 임시 저장 중지 완료")
+            
+        except Exception as e:
+            print(f"❌ 임시 저장 중지 실패: {e}")
+    
+    async def save_temp_storage_to_permanent(self, folder_name: str) -> str:
+        """임시 저장된 데이터를 영구 저장으로 이동"""
+        if not self.temp_storage_session_id or not self.temp_storage:
+            raise Exception("저장할 임시 데이터가 없습니다")
+        
+        try:
+            # 영구 저장 폴더 생성
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            permanent_folder = os.path.join(
+                self.base_db_path, 
+                f"{folder_name}_{timestamp}"
+            )
+            os.makedirs(permanent_folder, exist_ok=True)
+            
+            # CSV 파일 경로 설정
+            csv_path = os.path.join(permanent_folder, f"{timestamp}.csv")
+            
+            # 임시 데이터를 CSV로 저장
+            temp_data_list = list(self.temp_storage)
+            if temp_data_list:
+                # CSV 헤더 작성
+                fieldnames = list(temp_data_list[0].keys())
+                
+                with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    
+                    # 데이터 행들 작성
+                    for data in temp_data_list:
+                        writer.writerow(data)
+                
+                print(f"✅ 임시 데이터 영구 저장 완료: {csv_path} ({len(temp_data_list)}개 데이터)")
+                
+                # 임시 저장 중지
+                await self.stop_temp_storage()
+                
+                return permanent_folder
+            else:
+                raise Exception("저장할 데이터가 없습니다")
+                
+        except Exception as e:
+            print(f"❌ 임시 데이터 영구 저장 실패: {e}")
+            raise Exception(f"임시 데이터 영구 저장 실패: {str(e)}")
+    
+    async def _temp_storage_cleanup(self):
+        """30분 후 임시 저장 데이터 자동 정리"""
+        try:
+            # 30분 대기
+            await asyncio.sleep(1800)  # 30분 = 1800초
+            
+            if self.temp_storage_session_id:
+                print(f"🧹 임시 저장 데이터 자동 정리: {self.temp_storage_session_id}")
+                await self.stop_temp_storage()
+                
+        except asyncio.CancelledError:
+            print("🧹 임시 저장 정리 태스크 취소됨")
+        except Exception as e:
+            print(f"❌ 임시 저장 정리 오류: {e}")
+    
+    def get_temp_storage_info(self) -> Dict[str, Any]:
+        """임시 저장 정보 조회"""
+        if not self.temp_storage_session_id:
+            return {
+                "has_temp_data": False,
+                "session_id": None,
+                "data_count": 0,
+                "start_time": None,
+                "remaining_time": 0
+            }
+        
+        remaining_seconds = 0
+        if self.temp_storage_start_time:
+            elapsed = (datetime.now() - self.temp_storage_start_time).total_seconds()
+            remaining_seconds = max(0, 1800 - elapsed)  # 30분 - 경과시간
+        
+        return {
+            "has_temp_data": True,
+            "session_id": self.temp_storage_session_id,
+            "data_count": len(self.temp_storage),
+            "start_time": self.temp_storage_start_time.isoformat() if self.temp_storage_start_time else None,
+            "remaining_time": int(remaining_seconds)
+        }

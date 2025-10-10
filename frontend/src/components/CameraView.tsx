@@ -4,8 +4,12 @@
 import React, { useState, useEffect } from 'react';
 import { useSensorData } from '../hooks/useSensorData';
 
-const CameraView: React.FC = () => {
-  const { latestData, isLoading } = useSensorData();
+interface CameraViewProps {
+  cameraType?: 'basler' | 'hikrobot';
+}
+
+const CameraView: React.FC<CameraViewProps> = ({ cameraType }) => {
+  const { latestData } = useSensorData();
   const [baslerImageUrl, setBaslerImageUrl] = useState<string | null>(null);
   const [hikImageUrl, setHikImageUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'basler' | 'hik'>('basler');
@@ -17,7 +21,7 @@ const CameraView: React.FC = () => {
   // Basler 이미지 로드
   useEffect(() => {
     const loadBaslerImage = async () => {
-      if (latestData?.camera_data?.image_available) {
+      if ((latestData?.camera_data as any)?.image_available) {
         setBaslerLoading(true);
         try {
           const imageUrl = await import('../services/api').then(api => 
@@ -33,12 +37,12 @@ const CameraView: React.FC = () => {
     };
 
     loadBaslerImage();
-  }, [latestData?.camera_data?.image_available]);
+  }, [(latestData?.camera_data as any)?.image_available]);
 
   // HikRobot 이미지 로드
   useEffect(() => {
     const loadHikImage = async () => {
-      if (latestData?.hik_camera_data?.hik_image_available) {
+      if ((latestData?.hik_camera_data as any)?.hik_image_available) {
         setHikLoading(true);
         try {
           const imageUrl = await import('../services/api').then(api => 
@@ -54,7 +58,7 @@ const CameraView: React.FC = () => {
     };
 
     loadHikImage();
-  }, [latestData?.hik_camera_data?.hik_image_available]);
+  }, [(latestData?.hik_camera_data as any)?.hik_image_available]);
 
   const ImageDisplay = ({ 
     imageUrl, 
@@ -109,52 +113,98 @@ const CameraView: React.FC = () => {
         )}
       </div>
 
-      {/* 추가 정보 */}
-      <div className="mt-2 text-xs text-gray-400">
-        {title === 'Basler Camera' && latestData?.camera_data?.melt_pool_area && (
-          <div>Melt Pool Area: {latestData.camera_data.melt_pool_area.toFixed(2)} mm²</div>
-        )}
-        {title === 'HikRobot Camera' && latestData?.hik_camera_data && (
-          <div>Combined View</div>
-        )}
-      </div>
     </div>
   );
 
+  // cameraType이 지정되지 않은 경우 기본 동작 (탭 방식)
+  if (!cameraType) {
+    return (
+      <div className="h-full bg-white rounded-xl shadow-lg p-4">
+        <div className="h-full flex flex-col">
+          {/* 탭 헤더 */}
+          <div className="flex mb-4">
+            <button
+              className={`px-4 py-2 text-sm font-medium rounded-l-lg border ${
+                activeTab === 'basler'
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+              }`}
+              onClick={() => setActiveTab('basler')}
+            >
+              Basler Camera
+            </button>
+            <button
+              className={`px-4 py-2 text-sm font-medium rounded-r-lg border-t border-r border-b ${
+                activeTab === 'hik'
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+              }`}
+              onClick={() => setActiveTab('hik')}
+            >
+              HikRobot Camera
+            </button>
+          </div>
+
+          {/* 이미지 표시 영역 */}
+          <div className="flex-1 min-h-0">
+            {activeTab === 'basler' ? (
+              <ImageDisplay
+                imageUrl={baslerImageUrl}
+                loading={baslerLoading}
+                available={(latestData?.camera_data as any)?.image_available || false}
+                title="Basler Camera"
+                placeholder="📷"
+              />
+            ) : (
+              <ImageDisplay
+                imageUrl={hikImageUrl}
+                loading={hikLoading}
+                available={(latestData?.hik_camera_data as any)?.hik_image_available || false}
+                title="HikRobot Camera"
+                placeholder="📹"
+              />
+            )}
+          </div>
+
+          {/* 전체 상태 표시 */}
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Basler:</span>
+                <span className={(latestData?.camera_data as any)?.image_available ? 'text-green-600' : 'text-red-600'}>
+                  {(latestData?.camera_data as any)?.image_available ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">HikRobot:</span>
+                <span className={(latestData?.hik_camera_data as any)?.hik_image_available ? 'text-green-600' : 'text-red-600'}>
+                  {(latestData?.hik_camera_data as any)?.hik_image_available ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </div>
+            
+            {latestData?.timestamp && (
+              <div className="mt-2 text-xs text-gray-400 text-center">
+                Last Update: {new Date(latestData.timestamp).toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 개별 카메라 표시
   return (
     <div className="h-full bg-white rounded-xl shadow-lg p-4">
       <div className="h-full flex flex-col">
-        {/* 탭 헤더 */}
-        <div className="flex mb-4">
-          <button
-            className={`px-4 py-2 text-sm font-medium rounded-l-lg border ${
-              activeTab === 'basler'
-                ? 'bg-blue-500 text-white border-blue-500'
-                : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
-            }`}
-            onClick={() => setActiveTab('basler')}
-          >
-            Basler Camera
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium rounded-r-lg border-t border-r border-b ${
-              activeTab === 'hik'
-                ? 'bg-blue-500 text-white border-blue-500'
-                : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
-            }`}
-            onClick={() => setActiveTab('hik')}
-          >
-            HikRobot Camera
-          </button>
-        </div>
-
         {/* 이미지 표시 영역 */}
         <div className="flex-1 min-h-0">
-          {activeTab === 'basler' ? (
+          {cameraType === 'basler' ? (
             <ImageDisplay
               imageUrl={baslerImageUrl}
               loading={baslerLoading}
-              available={latestData?.camera_data?.image_available || false}
+              available={(latestData?.camera_data as any)?.image_available || false}
               title="Basler Camera"
               placeholder="📷"
             />
@@ -162,36 +212,13 @@ const CameraView: React.FC = () => {
             <ImageDisplay
               imageUrl={hikImageUrl}
               loading={hikLoading}
-              available={latestData?.hik_camera_data?.hik_image_available || false}
+              available={(latestData?.hik_camera_data as any)?.hik_image_available || false}
               title="HikRobot Camera"
               placeholder="📹"
             />
           )}
         </div>
 
-        {/* 전체 상태 표시 */}
-        <div className="mt-3 pt-3 border-t border-gray-200">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Basler:</span>
-              <span className={latestData?.camera_data?.image_available ? 'text-green-600' : 'text-red-600'}>
-                {latestData?.camera_data?.image_available ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">HikRobot:</span>
-              <span className={latestData?.hik_camera_data?.hik_image_available ? 'text-green-600' : 'text-red-600'}>
-                {latestData?.hik_camera_data?.hik_image_available ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-          </div>
-          
-          {latestData?.timestamp && (
-            <div className="mt-2 text-xs text-gray-400 text-center">
-              Last Update: {new Date(latestData.timestamp).toLocaleTimeString()}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

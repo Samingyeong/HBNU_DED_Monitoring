@@ -96,6 +96,8 @@ export const useAutoSave = () => {
               }));
               
               console.log('🚀 자동저장 시작:', sessionId);
+              // 백엔드에 자동저장 시작 요청
+              startAutoSaving(sessionId);
               return;
             }
             
@@ -110,6 +112,8 @@ export const useAutoSave = () => {
               }));
               
               console.log('🛑 자동저장 중지: NC 작업 완료');
+              // 백엔드에 자동저장 중지 요청
+              stopAutoSaving();
               return;
             }
             
@@ -124,6 +128,8 @@ export const useAutoSave = () => {
               }));
               
               console.log('🛑 자동저장 중지: 시스템 종료');
+              // 백엔드에 자동저장 중지 요청
+              stopAutoSaving();
               return;
             }
           }
@@ -170,6 +176,8 @@ export const useAutoSave = () => {
                 }));
                 
                 console.log('⚠️ 자동저장 중지: Exception 발생');
+                // 백엔드에 자동저장 중지 요청
+                stopAutoSaving();
                 return;
               }
             }
@@ -193,6 +201,47 @@ export const useAutoSave = () => {
     return () => clearInterval(interval);
   }, [checkTraceFile, checkExceptionFile]);
 
+  // 자동저장 시작 시 백엔드에 임시 저장 요청
+  const startAutoSaving = useCallback(async (sessionId: string) => {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/save/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          folder_name: sessionId,
+          auto_save: true
+        })
+      });
+      
+      if (response.ok) {
+        console.log('✅ 자동저장 임시 저장 시작됨:', sessionId);
+      } else {
+        console.error('❌ 자동저장 임시 저장 시작 실패');
+      }
+    } catch (error) {
+      console.error('❌ 자동저장 백엔드 통신 오류:', error);
+    }
+  }, []);
+
+  // 자동저장 중지 시 백엔드에 임시 저장 중지 요청
+  const stopAutoSaving = useCallback(async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/save/temp-stop', {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        console.log('✅ 자동저장 임시 저장 중지됨');
+      } else {
+        console.error('❌ 자동저장 임시 저장 중지 실패');
+      }
+    } catch (error) {
+      console.error('❌ 자동저장 백엔드 통신 오류:', error);
+    }
+  }, []);
+
   // 수동으로 자동저장 상태 리셋
   const resetAutoSave = useCallback(() => {
     setStatus({
@@ -206,6 +255,8 @@ export const useAutoSave = () => {
 
   return {
     ...status,
-    resetAutoSave
+    resetAutoSave,
+    startAutoSaving,
+    stopAutoSaving
   };
 };
