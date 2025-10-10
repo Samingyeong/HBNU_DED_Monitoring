@@ -15,6 +15,7 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle }) => {
   const [saveFolderName, setSaveFolderName] = useState('');
   const [tempStorageInfo, setTempStorageInfo] = useState<any>(null);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   
   // 실제 센서 데이터
   const { 
@@ -43,6 +44,15 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle }) => {
       console.log('🔄 자동저장 비활성화됨');
     }
   }, [isAutoSaving, saveStatus?.is_saving, isSavingLoading, currentSession]);
+
+  // 현재 시간 실시간 업데이트
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   // 임시 저장 정보 주기적으로 업데이트
   useEffect(() => {
@@ -138,59 +148,21 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle }) => {
           </div>
         </div>
 
-        {/* 중앙: 시스템 상태 */}
-        <div className="flex items-center space-x-6">
-          {/* 백엔드 연결 상태 */}
-          <div className="flex items-center space-x-2">
-            <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-sm font-medium text-gray-700">
-              Backend: {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
+        {/* 오른쪽: 시간 및 컨트롤 버튼들 */}
+        <div className="flex items-center space-x-4">
+          {/* 현재 시간 */}
+          <div className="text-base font-medium text-gray-600">
+            {currentTime.toLocaleDateString('ko-KR', { 
+              year: 'numeric', 
+              month: '2-digit', 
+              day: '2-digit' 
+            })} {currentTime.toLocaleTimeString('ko-KR', { 
+              hour12: true, 
+              hour: 'numeric', 
+              minute: '2-digit', 
+              second: '2-digit' 
+            })}
           </div>
-
-          {/* 저장 상태 */}
-          <div className="flex items-center space-x-2">
-            <div className={`w-3 h-3 rounded-full ${
-              saveStatus?.is_saving 
-                ? (isAutoSaving ? 'bg-green-500' : 'bg-blue-500')
-                : tempStorageInfo?.has_temp_data 
-                  ? 'bg-yellow-500'
-                  : 'bg-gray-400'
-            }`}></div>
-            <span className="text-sm font-medium text-gray-700">
-              Recording: {
-                saveStatus?.is_saving 
-                  ? (isAutoSaving ? 'Auto-Active' : 'Manual-Active')
-                  : tempStorageInfo?.has_temp_data 
-                    ? `Temp Data (${Math.floor(tempStorageInfo.remaining_time / 60)}:${(tempStorageInfo.remaining_time % 60).toString().padStart(2, '0')})`
-                    : 'Inactive'
-              }
-            </span>
-          </div>
-
-          {/* Exception 상태 */}
-          {hasException && (
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <span className="text-sm font-medium text-red-700">
-                Exception Detected
-              </span>
-            </div>
-          )}
-
-          {/* 자동저장 에러 */}
-          {autoSaveError && (
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-              <span className="text-sm font-medium text-yellow-700">
-                Auto-Save Error
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* 오른쪽: 컨트롤 버튼들 */}
-        <div className="flex items-center space-x-3">
           {/* 저장 폴더 입력 */}
           {!saveStatus?.is_saving && (
             <input

@@ -149,15 +149,25 @@ export default function CNCStatus() {
               return (
                 <div key={sensor.key} className="flex justify-between items-center text-xs">
                   <span className="text-gray-700">{sensor.name}</span>
-                  <div className="flex items-center space-x-2">
-                    <div className={`w-2 h-2 rounded-full ${status ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                    <span className={status ? 'text-green-600' : 'text-red-600'}>
-                      {status ? 'Connected' : 'Disconnected'}
-                    </span>
-                  </div>
+                  <div className={`w-2 h-2 rounded-full ${status ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* 시스템 상태 */}
+        <div className="bg-gray-50 p-2 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">시스템 상태</h4>
+          <div className="space-y-1">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-gray-700">Backend:</span>
+              <div className={`w-2 h-2 rounded-full ${true ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-gray-700">Recording:</span>
+              <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+            </div>
           </div>
         </div>
 

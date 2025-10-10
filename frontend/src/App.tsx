@@ -103,7 +103,7 @@ function App() {
       {/* Bottom Bar */}
       <div className="h-8 bg-white border-t border-gray-200 flex items-center justify-between px-4 w-[98%] rounded-xl shadow-sm">
         <div className="text-xs text-gray-500">
-          Copyright by KITECH V2.0 - Backend API Connected
+          Copyright by KITECH V2.0
         </div>
         <div className="flex space-x-2">
           <div className="text-xs text-gray-500">
