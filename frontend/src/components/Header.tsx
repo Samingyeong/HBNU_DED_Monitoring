@@ -260,7 +260,6 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle }) => {
           <button 
             onClick={() => {
               console.log('설정 버튼 클릭됨');
-              setShowConnectionModal(true);
             }}
             className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
           >

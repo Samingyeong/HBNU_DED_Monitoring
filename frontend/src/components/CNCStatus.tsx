@@ -80,17 +80,17 @@ export default function CNCStatus() {
         <h3 className="text-sm font-bold text-gray-900">시스템 상태</h3>
       </div>
       
-      <div className="flex-1 overflow-y-auto space-y-3">
+      <div className="flex-1 overflow-y-auto space-y-2">
         {/* 현재 좌표와 기계 좌표를 한 행에 2열로 배치 */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2">
           <PositionBox title="상대좌표/현재좌표" prefix="curpos" />
           <PositionBox title="절대좌표/기계좌표" prefix="macpos" />
         </div>
         
         {/* Feed Rate 카드 */}
-        <div className="bg-gray-50 p-3 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">Feed Rate</h4>
-          <div className="space-y-2">
+        <div className="bg-gray-50 p-2 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">Feed Rate</h4>
+          <div className="space-y-1">
             {/* 헤더 */}
             <div className="flex justify-center text-xs">
               <div className="w-20"></div>
@@ -117,9 +117,9 @@ export default function CNCStatus() {
         </div>
         
         {/* Gas 카드 */}
-        <div className="bg-gray-50 p-3 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">Gas (L/min)</h4>
-          <div className="grid grid-cols-3 gap-3">
+        <div className="bg-gray-50 p-2 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">Gas (L/min)</h4>
+          <div className="grid grid-cols-3 gap-2">
             {[
               { name: 'Coaxial', value: cncData.coaxial_gas },
               { name: 'Feeding', value: cncData.feeding_gas },
@@ -134,9 +134,9 @@ export default function CNCStatus() {
         </div>
 
         {/* 센서 연결 상태 */}
-        <div className="bg-gray-50 p-3 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-2 pb-1 border-b border-gray-300">센서 연결 상태</h4>
-          <div className="space-y-2">
+        <div className="bg-gray-50 p-2 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">센서 연결 상태</h4>
+          <div className="space-y-1">
             {[
               { name: 'Basler Camera', key: 'camera' },
               { name: 'HikRobot-1', key: 'hik_camera_1' },
@@ -163,7 +163,7 @@ export default function CNCStatus() {
 
         {/* 마지막 업데이트 시간 */}
         {latestData?.timestamp && (
-          <div className="mt-2 text-xs text-gray-400 text-center">
+          <div className="text-xs text-gray-400 text-center">
             Last Update: {new Date(latestData.timestamp).toLocaleTimeString()}
           </div>
         )}

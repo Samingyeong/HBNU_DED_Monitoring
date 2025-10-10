@@ -39,7 +39,7 @@ function App() {
       <div className="flex-1 flex flex-col xl:flex-row overflow-hidden w-[98%] mt-0 xl:mt-1 mb-2 xl:mb-4 gap-2 xl:gap-2">
         {/* Left Panel - CNC Status Only */}
         <div className="w-full xl:w-80 bg-white shadow-lg rounded-2xl flex flex-col">
-          <div className="flex-1 px-2 xl:px-3 pt-2 xl:pt-3 pb-1 xl:pb-1">
+          <div className="flex-1 px-2 xl:px-3 pt-2 xl:pt-3 pb-0 xl:pb-0">
             <CNCStatus />
           </div>
         </div>

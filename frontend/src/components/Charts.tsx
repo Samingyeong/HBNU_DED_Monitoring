@@ -128,10 +128,10 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
   };
 
   return (
-    <div className="h-full bg-white rounded-xl shadow-lg p-4">
+    <div className="h-full bg-white rounded-xl shadow-lg p-2">
       <div className="h-full flex flex-col">
         {/* 차트 제목 */}
-        <div className="mb-4">
+        <div className="mb-2">
           <h3 className="text-lg font-semibold text-gray-800 text-center">
             {config.title}
           </h3>
