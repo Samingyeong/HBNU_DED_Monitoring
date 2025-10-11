@@ -53,9 +53,9 @@ export default function CNCStatus() {
   };
 
   const PositionBox = ({ title, prefix }: { title: string; prefix: 'curpos' | 'macpos' }) => (
-    <div className="bg-gray-50 p-2 rounded-lg">
-      <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">{title}</h4>
-      <div className="space-y-1">
+    <div className="bg-gray-50 p-1.5 rounded-lg">
+      <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">{title}</h4>
+      <div className="space-y-0.5">
         {['x', 'y', 'z', 'a', 'c'].map(axis => (
           <div key={axis} className="flex items-center justify-center gap-2">
             <span className="text-xs font-medium text-gray-600 uppercase">{axis}:</span>
@@ -83,14 +83,14 @@ export default function CNCStatus() {
       <div className="flex-1 overflow-y-auto space-y-2">
         {/* 현재 좌표와 기계 좌표를 한 행에 2열로 배치 */}
         <div className="grid grid-cols-2 gap-2">
-          <PositionBox title="상대좌표/현재좌표" prefix="curpos" />
           <PositionBox title="절대좌표/기계좌표" prefix="macpos" />
+          <PositionBox title="상대좌표/현재좌표" prefix="curpos" />
         </div>
         
         {/* Feed Rate 카드 */}
-        <div className="bg-gray-50 p-2 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">Feed Rate</h4>
-          <div className="space-y-1">
+        <div className="bg-gray-50 p-1.5 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">Feed Rate</h4>
+          <div className="space-y-0.5">
             {/* 헤더 */}
             <div className="flex justify-center text-xs">
               <div className="w-20"></div>
@@ -117,8 +117,8 @@ export default function CNCStatus() {
         </div>
         
         {/* Gas 카드 */}
-        <div className="bg-gray-50 p-2 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">Gas (L/min)</h4>
+        <div className="bg-gray-50 p-1.5 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">Gas (L/min)</h4>
           <div className="grid grid-cols-3 gap-2">
             {[
               { name: 'Coaxial', value: cncData.coaxial_gas },
@@ -126,7 +126,7 @@ export default function CNCStatus() {
               { name: 'Shield', value: cncData.shield_gas }
             ].map((gas) => (
               <div key={gas.name} className="text-center">
-                <div className="text-xs font-medium text-gray-900 mb-1">{gas.name}</div>
+                <div className="text-xs font-medium text-gray-900 mb-0.5">{gas.name}</div>
                 <div className="text-sm font-mono text-gray-900">{formatValue(gas.value)}</div>
               </div>
             ))}
@@ -134,9 +134,9 @@ export default function CNCStatus() {
         </div>
 
         {/* 센서 연결 상태 */}
-        <div className="bg-gray-50 p-2 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">센서 연결 상태</h4>
-          <div className="space-y-1">
+        <div className="bg-gray-50 p-1.5 rounded-lg">
+          <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">센서 연결 상태</h4>
+          <div className="space-y-0.5">
             {[
               { name: 'Basler Camera', key: 'camera' },
               { name: 'HikRobot-1', key: 'hik_camera_1' },
@@ -149,24 +149,24 @@ export default function CNCStatus() {
               return (
                 <div key={sensor.key} className="flex justify-between items-center text-xs">
                   <span className="text-gray-700">{sensor.name}</span>
-                  <div className={`w-2 h-2 rounded-full ${status ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${status ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* 시스템 상태 */}
-        <div className="bg-gray-50 p-2 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-1 pb-1 border-b border-gray-300">시스템 상태</h4>
+        {/* sys연결 상태 */}
+        <div className="bg-blue-50 p-2 rounded-lg border-2 border-blue-300">
+          <h4 className="text-xs font-bold text-blue-900 mb-1 pb-0.5 border-b border-blue-300">sys연결 상태</h4>
           <div className="space-y-1">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-700">Backend:</span>
-              <div className={`w-2 h-2 rounded-full ${true ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-medium text-blue-800">Backend:</span>
+              <div className={`w-3 h-3 rounded-full ${true ? 'bg-green-500' : 'bg-red-500'}`}></div>
             </div>
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-700">Recording:</span>
-              <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-medium text-blue-800">Recording:</span>
+              <div className="w-3 h-3 rounded-full bg-gray-400"></div>
             </div>
           </div>
         </div>
