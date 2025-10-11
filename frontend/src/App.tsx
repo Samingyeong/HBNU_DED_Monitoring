@@ -5,10 +5,16 @@ import ConnectionStatus from './components/ConnectionStatus';
 import CameraView from './components/CameraView';
 import Charts from './components/Charts';
 import EmergencyModal from './components/EmergencyModal';
+import InitialSetupModal from './components/InitialSetupModal';
+import ToolPath from './components/ToolPath';
 
 function App() {
   const [emergency, setEmergency] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [showInitialSetup, setShowInitialSetup] = useState(true);
+  const [operatorName, setOperatorName] = useState('');
+  const [gcodeFolderPath, setGcodeFolderPath] = useState('');
+  const [folderName, setFolderName] = useState('');
 
   const handleEmergencyToggle = (newEmergency: boolean) => {
     if (newEmergency && !emergency) {
@@ -30,10 +36,38 @@ function App() {
     setShowEmergencyModal(false);
   };
 
+  const handleInitialSetupComplete = (operator: string, gcodePath: string) => {
+    setOperatorName(operator);
+    setGcodeFolderPath(gcodePath);
+    
+    // 폴더명 자동 생성: YYYYMMDD_HHMM_작업자명
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    
+    const generatedFolderName = `${year}${month}${day}_${hour}${minute}_${operator}`;
+    setFolderName(generatedFolderName);
+    
+    setShowInitialSetup(false);
+    
+    console.log('설정 완료:', {
+      operatorName: operator,
+      gcodeFolderPath: gcodePath,
+      folderName: generatedFolderName
+    });
+  };
+
   return (
     <div className="h-screen bg-gray-100 flex flex-col items-center p-2 overflow-hidden">
       {/* Header */}
-      <Header emergency={emergency} onEmergencyToggle={handleEmergencyToggle} />
+      <Header 
+        emergency={emergency} 
+        onEmergencyToggle={handleEmergencyToggle}
+        folderName={folderName}
+      />
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col xl:flex-row overflow-hidden w-[98%] mt-0 xl:mt-1 mb-2 xl:mb-4 gap-2 xl:gap-2">
@@ -58,17 +92,9 @@ function App() {
               <CameraView cameraType="hikrobot" />
             </div>
             
-            {/* 3행 - ToolPath (준비중) */}
-            <div className="flex-1 bg-white shadow-lg rounded-2xl flex items-center justify-center">
-              <div className="text-center">
-                <div className="w-8 h-8 xl:w-16 xl:h-16 mx-auto mb-2 xl:mb-3 bg-gray-200 rounded-xl flex items-center justify-center">
-                  <svg className="w-4 h-4 xl:w-8 xl:h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
-                  </svg>
-                </div>
-                <h3 className="text-sm xl:text-lg font-semibold text-gray-700 mb-1">ToolPath</h3>
-                <p className="text-xs xl:text-sm text-gray-500">준비중입니다</p>
-              </div>
+            {/* 3행 - ToolPath */}
+            <div className="flex-1">
+              <ToolPath />
             </div>
           </div>
 
@@ -111,6 +137,12 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Initial Setup Modal */}
+      <InitialSetupModal
+        isOpen={showInitialSetup}
+        onComplete={handleInitialSetupComplete}
+      />
 
       {/* Emergency Modal */}
       <EmergencyModal

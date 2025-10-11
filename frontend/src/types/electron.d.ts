@@ -9,6 +9,10 @@ declare global {
       }>;
       checkFileExists: (filePath: string) => Promise<boolean>;
     };
+    electron?: {
+      selectFolder: () => Promise<string | null>;
+      selectFile: () => Promise<string | null>;
+    };
   }
 }
 

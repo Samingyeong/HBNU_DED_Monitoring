@@ -23,6 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.sensor_manager import SensorManager
 from backend.data_storage import DataStorage
 from backend.websocket_manager import WebSocketManager
+from backend.gcode_parser import nc_parser
 
 
 class SensorData(BaseModel):
@@ -272,6 +273,44 @@ async def get_image(image_type: str):
         return FileResponse(image_path)
     else:
         raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다")
+
+
+class NCRequest(BaseModel):
+    """NC코드 파일 경로 또는 내용 요청"""
+    file_path: Optional[str] = None
+    file_content: Optional[str] = None
+
+
+@app.post("/api/nc/parse")
+async def parse_nc(request: NCRequest):
+    """NC코드 파일 파싱"""
+    try:
+        if request.file_path:
+            # 파일 경로로 파싱 (Electron 환경)
+            result = nc_parser.parse_file(request.file_path)
+        elif request.file_content:
+            # 파일 내용으로 파싱 (웹 환경)
+            result = nc_parser.parse_content(request.file_content)
+        else:
+            raise HTTPException(status_code=400, detail="파일 경로 또는 내용이 필요합니다")
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"NC코드 파싱 실패: {str(e)}")
+
+
+@app.get("/api/nc/path")
+async def get_nc_path():
+    """현재 파싱된 NC코드 경로 데이터 조회"""
+    if not nc_parser.path_points:
+        raise HTTPException(status_code=404, detail="파싱된 NC코드가 없습니다")
+    
+    return {
+        "success": True,
+        "total_points": len(nc_parser.path_points),
+        "path_points": nc_parser.path_points,
+        "bounds": nc_parser._calculate_bounds()
+    }
 
 
 @app.websocket("/ws")

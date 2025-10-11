@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -46,6 +46,45 @@ ipcMain.handle('check-file-exists', async (event: any, filePath: string) => {
     return fs.existsSync(filePath)
   } catch (error: any) {
     return false
+  }
+})
+
+// 폴더 선택 API
+ipcMain.handle('select-folder', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory']
+    })
+    
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0]
+    }
+    return null
+  } catch (error: any) {
+    console.error('폴더 선택 오류:', error)
+    return null
+  }
+})
+
+// 파일 선택 API
+ipcMain.handle('select-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      title: 'NC코드 파일 선택',
+      filters: [
+        { name: 'NC코드 파일', extensions: ['nc', 'txt', 'tap', 'cnc'] },
+        { name: '모든 파일', extensions: ['*'] }
+      ]
+    })
+    
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0]
+    }
+    return null
+  } catch (error: any) {
+    console.error('파일 선택 오류:', error)
+    return null
   }
 })
 

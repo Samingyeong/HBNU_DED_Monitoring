@@ -8,9 +8,10 @@ import { useSensorData } from '../hooks/useSensorData';
 interface HeaderProps {
   emergency: boolean;
   onEmergencyToggle: (emergency: boolean) => void;
+  folderName?: string;
 }
 
-const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle }) => {
+const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderName }) => {
   const [isSavingLoading, setIsSavingLoading] = useState(false);
   const [saveFolderName, setSaveFolderName] = useState('');
   const [tempStorageInfo, setTempStorageInfo] = useState<any>(null);
@@ -163,15 +164,12 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle }) => {
               second: '2-digit' 
             })}
           </div>
-          {/* 저장 폴더 입력 */}
-          {!saveStatus?.is_saving && (
-            <input
-              type="text"
-              placeholder={tempStorageInfo?.has_temp_data ? "저장할 폴더명" : "폴더명"}
-              value={saveFolderName}
-              onChange={(e) => setSaveFolderName(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          
+          {/* 폴더명 표시 (수정 불가) */}
+          {folderName && (
+            <div className="px-3 py-2 text-sm bg-blue-50 border border-blue-300 rounded-lg text-blue-700 font-medium">
+              {folderName}
+            </div>
           )}
 
           {/* 임시 데이터 저장 버튼 */}
