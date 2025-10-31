@@ -5,48 +5,16 @@ import React, { useState } from 'react';
 
 interface InitialSetupModalProps {
   isOpen: boolean;
-  onComplete: (operatorName: string, gcodeFolderPath: string) => void;
+  onComplete: (operatorName: string) => void;
 }
 
 const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplete }) => {
   const [operatorName, setOperatorName] = useState('');
-  const [gcodeFolderPath, setGcodeFolderPath] = useState('');
-  const [fileContent, setFileContent] = useState<string>('');
+  
 
   if (!isOpen) return null;
 
-  const handleSelectFile = async () => {
-    try {
-      // 모든 환경에서 HTML5 파일 API 사용
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.nc,.txt,.tap,.cnc';
-      input.multiple = false;
-      
-      input.onchange = (e) => {
-        const target = e.target as HTMLInputElement;
-        if (target.files && target.files.length > 0) {
-          const file = target.files[0];
-          // 파일명 표시
-          setGcodeFolderPath(file.name);
-          
-          // 파일 내용을 읽어서 백엔드로 전송할 수 있도록 준비
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const content = event.target?.result as string;
-            setFileContent(content);
-            console.log('선택된 파일:', file.name);
-            console.log('파일 내용 미리보기:', content.substring(0, 200) + '...');
-          };
-          reader.readAsText(file);
-        }
-      };
-      
-      input.click();
-    } catch (error) {
-      console.error('파일 선택 오류:', error);
-    }
-  };
+  // NC 업로드 제거: 파일 선택 기능 비활성화
 
   const handleSubmit = async () => {
     if (!operatorName.trim()) {
@@ -54,43 +22,8 @@ const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplet
       return;
     }
 
-    if (!gcodeFolderPath.trim()) {
-      alert('NC코드 파일을 선택해주세요.');
-      return;
-    }
-
-    if (!fileContent.trim()) {
-      alert('파일 내용을 읽을 수 없습니다. 파일을 다시 선택해주세요.');
-      return;
-    }
-
-    // 백엔드로 NC코드 파일 전송 및 파싱
-    try {
-      // 모든 환경에서 파일 내용 사용
-      const requestBody = {
-        file_content: fileContent
-      };
-      
-      const response = await fetch('http://127.0.0.1:8000/api/nc/parse', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log('NC코드 파싱 성공:', result);
-        onComplete(operatorName, gcodeFolderPath);
-      } else {
-        const error = await response.json();
-        alert(`NC코드 파싱 실패: ${error.detail || '알 수 없는 오류'}`);
-      }
-    } catch (error) {
-      console.error('NC코드 파싱 오류:', error);
-      alert('백엔드 서버와 통신 중 오류가 발생했습니다.');
-    }
+    // NC 기능 제거: 작업자명만 전달
+    onComplete(operatorName);
   };
 
   return (
@@ -123,27 +56,7 @@ const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplet
             />
           </div>
 
-          {/* NC코드 파일 선택 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              NC코드 파일 <span className="text-red-500">*</span>
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={gcodeFolderPath}
-                onChange={(e) => setGcodeFolderPath(e.target.value)}
-                placeholder="NC코드 파일명"
-                className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              />
-              <button
-                onClick={handleSelectFile}
-                className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors"
-              >
-                📄 파일 선택
-              </button>
-            </div>
-          </div>
+          {/* NC 업로드 제거됨 */}
 
           {/* 미리보기 */}
           {operatorName && (

@@ -284,3 +284,11 @@ temp/
 
 # Electron
 dist-electron/
+frontend/release/
+
+# Project runtime/output data
+DB/
+backend/images/
+
+# Python/Node environments (already common, ensure root venv too)
+venv/

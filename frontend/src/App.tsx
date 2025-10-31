@@ -6,14 +6,14 @@ import CameraView from './components/CameraView';
 import Charts from './components/Charts';
 import EmergencyModal from './components/EmergencyModal';
 import InitialSetupModal from './components/InitialSetupModal';
-import ToolPath from './components/ToolPath';
+// ToolPath 기능 제거
 
 function App() {
   const [emergency, setEmergency] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [showInitialSetup, setShowInitialSetup] = useState(true);
   const [operatorName, setOperatorName] = useState('');
-  const [gcodeFolderPath, setGcodeFolderPath] = useState('');
+  
   const [folderName, setFolderName] = useState('');
 
   const handleEmergencyToggle = (newEmergency: boolean) => {
@@ -36,9 +36,8 @@ function App() {
     setShowEmergencyModal(false);
   };
 
-  const handleInitialSetupComplete = (operator: string, gcodePath: string) => {
+  const handleInitialSetupComplete = (operator: string) => {
     setOperatorName(operator);
-    setGcodeFolderPath(gcodePath);
     
     // 폴더명 자동 생성: YYYYMMDD_HHMM_작업자명
     const now = new Date();
@@ -55,7 +54,6 @@ function App() {
     
     console.log('설정 완료:', {
       operatorName: operator,
-      gcodeFolderPath: gcodePath,
       folderName: generatedFolderName
     });
   };
@@ -80,7 +78,7 @@ function App() {
     
         {/* Right Panel - 2열 3행 레이아웃 */}
         <div className="flex-1 flex flex-col xl:flex-row gap-2">
-          {/* 1열 - 카메라 및 ToolPath */}
+          {/* 1열 - 카메라 */}
           <div className="w-full xl:w-1/3 flex flex-col gap-2">
             {/* 1행 - Basler 카메라 */}
             <div className="flex-1">
@@ -92,10 +90,7 @@ function App() {
               <CameraView cameraType="hikrobot" />
             </div>
             
-            {/* 3행 - ToolPath */}
-            <div className="flex-1">
-              <ToolPath />
-            </div>
+            {/* ToolPath 제거 */}
           </div>
 
           {/* 2열 - 차트들 */}

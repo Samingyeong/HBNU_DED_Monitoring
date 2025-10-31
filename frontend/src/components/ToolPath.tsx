@@ -17,6 +17,7 @@ interface PathPoint {
 }
 
 interface NCPathData {
+  success?: boolean;
   path_points: PathPoint[];
   bounds: {
     x_min: number;
@@ -36,6 +37,7 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ncData, setNcData] = useState<NCPathData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [demoProgress, setDemoProgress] = useState(0);
   const { latestData } = useSensorData();
 
   // NC코드 경로 데이터 로드
@@ -52,16 +54,21 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
           console.log('NC코드 데이터 로드 성공:', data);
           setNcData(data);
         } else if (response.status === 404) {
-          // NC코드가 파싱되지 않은 경우
-          console.log('NC코드 데이터 없음 (404)');
-          setNcData(null);
+          // NC코드가 파싱되지 않은 경우 - 데모 데이터 생성
+          console.log('NC코드 데이터 없음 (404) - 데모 데이터 생성');
+          const demoData = generateDemoNCPath();
+          setNcData(demoData);
         } else {
           console.log('응답 오류:', response.status, response.statusText);
-          setNcData(null);
+          // 오류 시에도 데모 데이터 생성
+          const demoData = generateDemoNCPath();
+          setNcData(demoData);
         }
       } catch (error) {
         console.error('NC코드 경로 데이터 로드 실패:', error);
-        setNcData(null);
+        // 오류 시에도 데모 데이터 생성
+        const demoData = generateDemoNCPath();
+        setNcData(demoData);
       } finally {
         setLoading(false);
       }
@@ -75,6 +82,71 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // 데모 진행률 애니메이션 (실제 CNC 데이터가 없을 때)
+  useEffect(() => {
+    if (!latestData?.cnc_data?.curpos_x && ncData) {
+      const demoInterval = setInterval(() => {
+        setDemoProgress(prev => (prev + 0.5) % 100);
+      }, 100);
+      
+      return () => clearInterval(demoInterval);
+    }
+  }, [ncData, latestData]);
+
+  // 데모 NC코드 경로 생성 함수
+  const generateDemoNCPath = (): NCPathData => {
+    const pathPoints: PathPoint[] = [];
+    
+    // 사각형 경로 생성 (10x10mm)
+    const points = [
+      { x: 0, y: 0, z: 1 },
+      { x: 10, y: 0, z: 1 },
+      { x: 10, y: 10, z: 1 },
+      { x: 0, y: 10, z: 1 },
+      { x: 0, y: 0, z: 1 },
+      // 내부 원형 경로
+      { x: 2, y: 2, z: 1 },
+      { x: 8, y: 2, z: 1 },
+      { x: 8, y: 8, z: 1 },
+      { x: 2, y: 8, z: 1 },
+      { x: 2, y: 2, z: 1 },
+      // 추가 세부 경로
+      { x: 3, y: 3, z: 1 },
+      { x: 7, y: 3, z: 1 },
+      { x: 7, y: 7, z: 1 },
+      { x: 3, y: 7, z: 1 },
+      { x: 3, y: 3, z: 1 },
+      { x: 5, y: 5, z: 1 }
+    ];
+
+    points.forEach((point, index) => {
+      pathPoints.push({
+        line: index + 1,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        type: 'linear'
+      });
+    });
+
+    return {
+      success: true,
+      total_points: pathPoints.length,
+      path_points: pathPoints,
+      bounds: {
+        x_min: 0,
+        x_max: 10,
+        y_min: 0,
+        y_max: 10,
+        z_min: 1,
+        z_max: 1,
+        x_range: 10,
+        y_range: 10,
+        z_range: 0
+      }
+    };
+  };
+
   // Canvas 렌더링
   useEffect(() => {
     if (!canvasRef.current || !ncData) return;
@@ -83,10 +155,13 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Canvas 크기 설정
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    // Canvas 크기 고정 설정
+    const fixedWidth = 400;
+    const fixedHeight = 300;
+    canvas.width = fixedWidth;
+    canvas.height = fixedHeight;
+    canvas.style.width = `${fixedWidth}px`;
+    canvas.style.height = `${fixedHeight}px`;
 
     // 배경 초기화
     ctx.fillStyle = '#f9fafb';
@@ -109,9 +184,20 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       return canvas.height - padding - (y - bounds.y_min) * scale;
     };
 
-    // 현재 CNC 위치
-    const currentX = latestData?.cnc_data?.curpos_x || 0;
-    const currentY = latestData?.cnc_data?.curpos_y || 0;
+    // 현재 CNC 위치 (실제 데이터가 없으면 데모 위치 사용)
+    let currentX: number, currentY: number;
+    
+    if (latestData?.cnc_data?.curpos_x !== undefined) {
+      // 실제 CNC 데이터 사용
+      currentX = latestData.cnc_data.curpos_x || 0;
+      currentY = latestData.cnc_data.curpos_y || 0;
+    } else {
+      // 데모 진행률에 따른 위치 계산
+      const progressIndex = Math.floor((demoProgress / 100) * (path_points.length - 1));
+      const currentPoint = path_points[progressIndex] || path_points[0];
+      currentX = currentPoint.x;
+      currentY = currentPoint.y;
+    }
 
     // 현재 위치와 가장 가까운 경로 포인트 찾기
     let closestIndex = 0;
@@ -240,7 +326,7 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     ctx.fillText(`포인트: ${closestIndex + 1} / ${path_points.length}`, 10, 65);
     ctx.fillText(`현재 위치: (${currentX.toFixed(2)}, ${currentY.toFixed(2)})`, 10, 80);
 
-  }, [ncData, latestData]);
+  }, [ncData, latestData, demoProgress]);
 
   if (loading) {
     return (
@@ -270,7 +356,7 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
   }
 
   return (
-    <div className={`h-full bg-white shadow-lg rounded-2xl p-3 flex flex-col ${className}`}>
+    <div className={`bg-white shadow-lg rounded-2xl p-3 flex flex-col ${className}`} style={{ width: '400px', height: '350px' }}>
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-sm font-semibold text-gray-800">ToolPath 진행상황</h3>
         <div className="flex items-center space-x-2 text-xs text-gray-500">
@@ -283,7 +369,8 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       
       <canvas
         ref={canvasRef}
-        className="flex-1 w-full h-full border border-gray-200 rounded-lg"
+        className="border border-gray-200 rounded-lg"
+        style={{ width: '400px', height: '300px' }}
       />
     </div>
   );

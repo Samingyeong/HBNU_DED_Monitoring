@@ -10,7 +10,7 @@ numpy==1.24.4
 opencv-python==4.8.1.78
 
 # 기존 센서 통신 의존성 (기존 requirements.txt에서 가져옴)
-pypylon==3.1.0
+pypylon==3.0.1
 pyserial==3.5
 
 # 비동기 처리

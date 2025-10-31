@@ -422,6 +422,37 @@ class DataStorage:
         except Exception as e:
             print(f"❌ 임시 데이터 영구 저장 실패: {e}")
             raise Exception(f"임시 데이터 영구 저장 실패: {str(e)}")
+
+    async def save_temp_storage_to_path(self, dest_path: str) -> str:
+        """임시 저장 데이터를 사용자가 지정한 절대 경로에 저장"""
+        if not self.temp_storage_session_id or not self.temp_storage:
+            raise Exception("저장할 임시 데이터가 없습니다")
+        
+        try:
+            # 대상 경로 정규화 및 폴더 생성
+            dest_path = os.path.abspath(dest_path)
+            os.makedirs(dest_path, exist_ok=True)
+            
+            # 파일명: 현재 시각 기준
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = os.path.join(dest_path, f"{timestamp}.csv")
+            
+            temp_data_list = list(self.temp_storage)
+            if temp_data_list:
+                fieldnames = list(temp_data_list[0].keys())
+                with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for data in temp_data_list:
+                        writer.writerow(data)
+                print(f"✅ 임시 데이터 사용자 경로로 저장 완료: {csv_path} ({len(temp_data_list)}개 데이터)")
+                # 임시 저장은 유지(자동저장 계속) — 요청 시에만 중지
+                return dest_path
+            else:
+                raise Exception("저장할 데이터가 없습니다")
+        except Exception as e:
+            print(f"❌ 사용자 경로 저장 실패: {e}")
+            raise Exception(f"사용자 경로 저장 실패: {str(e)}")
     
     async def _temp_storage_cleanup(self):
         """30분 후 임시 저장 데이터 자동 정리"""

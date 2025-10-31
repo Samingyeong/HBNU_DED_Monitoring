@@ -76,23 +76,31 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
     return () => clearInterval(interval);
   }, []);
 
-  const handleSaveToggle = async () => {
-    if (isSavingLoading) return;
-
+  // Save Now: 임시저장 중인 데이터를 즉시 디스크에 저장 (자동저장 유지)
+  const handleSaveNow = async () => {
+    if (isSavingLoading || !tempStorageInfo?.has_temp_data) return;
     try {
       setIsSavingLoading(true);
-      
-      if (saveStatus?.is_saving) {
-        await stopSaving();
-        resetAutoSave(); // 자동저장 상태도 리셋
-        console.log('수동 저장 중지됨');
+      const inputValue = saveFolderName?.trim();
+      const isAbsolutePath = !!inputValue && (inputValue.includes(':') || inputValue.startsWith('\\') || inputValue.includes('\\'));
+      const body: any = isAbsolutePath
+        ? { dest_path: inputValue }
+        : { folder_name: inputValue || `manual_save_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}` };
+
+      const response = await fetch('http://127.0.0.1:8000/api/save/temp-to-permanent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ 즉시 저장 완료:', result.save_path);
       } else {
-        const folderName = saveFolderName || `monitoring_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}`;
-        await startSaving(folderName);
-        console.log('수동 저장 시작됨:', folderName);
+        console.error('❌ 즉시 저장 실패');
       }
     } catch (error) {
-      console.error('저장 토글 실패:', error);
+      console.error('즉시 저장 중 오류:', error);
     } finally {
       setIsSavingLoading(false);
     }
@@ -172,47 +180,36 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
             </div>
           )}
 
-          {/* 임시 데이터 저장 버튼 */}
-          {tempStorageInfo?.has_temp_data && !saveStatus?.is_saving && (
-            <button
-              onClick={handleSaveTempData}
-              disabled={isSavingLoading || !isConnected}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-green-500 hover:bg-green-600 text-white ${
-                (isSavingLoading || !isConnected) ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {isSavingLoading ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Saving...</span>
-                </div>
-              ) : (
-                `Save Temp Data (${tempStorageInfo.data_count})`
-              )}
-            </button>
+          {/* Save Now: 자동저장 중에도 사용 가능 */}
+          {tempStorageInfo?.has_temp_data && (
+            <>
+              <input
+                type="text"
+                value={saveFolderName}
+                onChange={(e) => setSaveFolderName(e.target.value)}
+                placeholder="절대 경로 또는 폴더명"
+                className="px-3 py-2 text-sm border rounded-lg"
+              />
+              <button
+                onClick={handleSaveNow}
+                disabled={isSavingLoading || !isConnected}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-green-500 hover:bg-green-600 text-white ${
+                  (isSavingLoading || !isConnected) ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isSavingLoading ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </div>
+                ) : (
+                  `Save Now (${tempStorageInfo.data_count})`
+                )}
+              </button>
+            </>
           )}
 
-          {/* 저장 토글 버튼 */}
-          <button
-            onClick={handleSaveToggle}
-            disabled={isSavingLoading || !isConnected}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              saveStatus?.is_saving
-                ? 'bg-red-500 hover:bg-red-600 text-white'
-                : 'bg-blue-500 hover:bg-blue-600 text-white'
-            } ${(isSavingLoading || !isConnected) ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {isSavingLoading ? (
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>Processing...</span>
-              </div>
-            ) : saveStatus?.is_saving ? (
-              'Stop Recording'
-            ) : (
-              'Start Recording'
-            )}
-          </button>
+          {/* Recording 버튼 제거됨 */}
 
           {/* 비상 정지 버튼 */}
           <button
