@@ -55,8 +55,20 @@ async def lifespan(app: FastAPI):
     
     print("🚀 백엔드 서버 시작 중...")
     
+    # CNC Subprocess 모드 설정 (환경 변수 또는 기본값)
+    use_cnc_subprocess = os.getenv('USE_CNC_SUBPROCESS', 'false').lower() == 'true'
+    cnc_python_path = os.getenv('CNC_PYTHON_EXECUTABLE', None)
+    
+    if use_cnc_subprocess:
+        print("📌 CNC Subprocess 모드 활성화 (32비트 호환성)")
+        if cnc_python_path:
+            print(f"   Python 경로: {cnc_python_path}")
+    
     # 센서 매니저 초기화
-    sensor_manager = SensorManager()
+    sensor_manager = SensorManager(
+        use_cnc_subprocess=use_cnc_subprocess,
+        cnc_python_path=cnc_python_path
+    )
     await sensor_manager.initialize()
     
     # 데이터 스토리지 초기화
@@ -99,11 +111,11 @@ app.add_middleware(
 
 
 async def collect_sensor_data():
-    """센서 데이터 수집 및 WebSocket 전송"""
+    """센서 데이터 수집 및 WebSocket 전송 (HBU_monitoring 방식 - 50Hz)"""
     while True:
         try:
             if sensor_manager and data_storage:
-                # 모든 센서 데이터 수집
+                # 모든 센서 데이터 수집 (이미 Thread로 수집 중이므로 DB에서만 조회)
                 sensor_data = await sensor_manager.collect_all_data()
                 
                 # 데이터 저장소에 저장
@@ -113,8 +125,8 @@ async def collect_sensor_data():
                 if websocket_manager:
                     await websocket_manager.broadcast_data(sensor_data)
             
-            # 100ms 간격으로 수집 (10Hz)
-            await asyncio.sleep(0.1)
+            # 20ms 간격으로 수집 (50Hz) - HBU_monitoring과 동일
+            await asyncio.sleep(0.02)
             
         except Exception as e:
             print(f"❌ 데이터 수집 오류: {e}")

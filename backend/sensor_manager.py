@@ -40,6 +40,14 @@ except ImportError as e:
     print(f"⚠️ CNC 모듈 임포트 실패: {e}")
     CNC_AVAILABLE = False
 
+# CNC Subprocess Manager (32비트 호환성)
+try:
+    from backend.cnc_subprocess_manager import CNCSubprocessManager
+    CNC_SUBPROCESS_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ CNC Subprocess Manager 임포트 실패: {e}")
+    CNC_SUBPROCESS_AVAILABLE = False
+
 try:
     from Sensors.vision2 import HikCameraThread
     HIKCAMERA_AVAILABLE = True
@@ -51,12 +59,19 @@ except ImportError as e:
 class SensorManager:
     """센서 통신 및 데이터 수집을 관리하는 클래스"""
     
-    def __init__(self):
+    def __init__(self, use_cnc_subprocess: bool = False, cnc_python_path: str = None):
+        """
+        Args:
+            use_cnc_subprocess: True면 CNC를 subprocess로 실행 (32비트 호환성)
+            cnc_python_path: 32비트 Python 실행 파일 경로
+        """
         self.sensors = {}
         self.collectors = {}
         self.databases = {}
         self.connection_status = {}
         self.hik_cam_threads = {}
+        self.use_cnc_subprocess = use_cnc_subprocess
+        self.cnc_subprocess_manager = None
         
         # 센서별 연결 상태
         self.connection_status = {
@@ -183,40 +198,79 @@ class SensorManager:
             self.connection_status["pyrometer"] = False
     
     async def _initialize_cnc(self):
-        """HXApi CNC 초기화"""
-        if not CNC_AVAILABLE:
-            print("⚠️ CNC 모듈이 사용 불가능합니다")
-            self.connection_status["cnc"] = False
-            return
+        """HXApi CNC 초기화 (subprocess 옵션 지원)"""
+        # Subprocess 모드 사용
+        if self.use_cnc_subprocess:
+            if not CNC_SUBPROCESS_AVAILABLE:
+                print("⚠️ CNC Subprocess Manager가 사용 불가능합니다")
+                self.connection_status["cnc"] = False
+                return
             
-        try:
-            print("🔧 HXApi CNC 연결 시도 중...")
-            
-            loop = asyncio.get_event_loop()
-            
-            # 설정 파일 경로 설정
-            config_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "config", "HXApi.ini"
-            )
-            
-            self.sensors["cnc"] = await loop.run_in_executor(
-                None, CNCCommunication, config_path
-            )
-            self.databases["cnc"] = CNC_DB()
-            self.collectors["cnc"] = CNC_Collector(
-                self.sensors["cnc"],
-                self.databases["cnc"]
-            )
-            
-            self.collectors["cnc"].start()
-            self.connection_status["cnc"] = True
-            
-            print("✅ HXApi CNC 연결 성공")
-            
-        except Exception as e:
-            print(f"❌ HXApi CNC 연결 실패: {e}")
-            self.connection_status["cnc"] = False
+            try:
+                print("🔧 HXApi CNC 연결 시도 중... (Subprocess 모드)")
+                
+                # 설정 파일 경로 설정
+                config_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "config", "HXApi.ini"
+                )
+                
+                # 환경 변수에서 Python 경로 읽기 (선택적)
+                cnc_python_path = os.getenv('CNC_PYTHON_EXECUTABLE', None)
+                
+                # Subprocess Manager 생성 및 시작
+                self.cnc_subprocess_manager = CNCSubprocessManager(
+                    python_executable=cnc_python_path,
+                    config_path=config_path
+                )
+                self.cnc_subprocess_manager.start()
+                
+                # DB는 subprocess에서 직접 사용하지 않으므로 None
+                self.databases["cnc"] = None
+                self.connection_status["cnc"] = True
+                
+                print("✅ HXApi CNC 연결 성공 (Subprocess 모드)")
+                
+            except Exception as e:
+                print(f"❌ HXApi CNC 연결 실패 (Subprocess): {e}")
+                self.connection_status["cnc"] = False
+                return
+        
+        # 직접 DLL 로드 모드 (기존 방식)
+        else:
+            if not CNC_AVAILABLE:
+                print("⚠️ CNC 모듈이 사용 불가능합니다")
+                self.connection_status["cnc"] = False
+                return
+                
+            try:
+                print("🔧 HXApi CNC 연결 시도 중... (직접 DLL 로드)")
+                
+                loop = asyncio.get_event_loop()
+                
+                # 설정 파일 경로 설정
+                config_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "config", "HXApi.ini"
+                )
+                
+                self.sensors["cnc"] = await loop.run_in_executor(
+                    None, CNCCommunication, config_path
+                )
+                self.databases["cnc"] = CNC_DB()
+                self.collectors["cnc"] = CNC_Collector(
+                    self.sensors["cnc"],
+                    self.databases["cnc"]
+                )
+                
+                self.collectors["cnc"].start()
+                self.connection_status["cnc"] = True
+                
+                print("✅ HXApi CNC 연결 성공 (직접 DLL 로드)")
+                
+            except Exception as e:
+                print(f"❌ HXApi CNC 연결 실패: {e}")
+                self.connection_status["cnc"] = False
     
     async def _initialize_hik_cameras(self):
         """HikRobot 카메라 2대 초기화"""
@@ -265,7 +319,10 @@ class SensorManager:
             self.connection_status["hik_camera_2"] = False
     
     async def collect_all_data(self) -> Dict[str, Any]:
-        """모든 센서에서 데이터 수집"""
+        """
+        모든 센서에서 데이터 수집 (HBU_monitoring 방식)
+        각 센서는 이미 Thread로 독립적으로 수집 중이므로 DB에서만 조회
+        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         
         sensor_data = {
@@ -313,7 +370,7 @@ class SensorManager:
             })
             return sensor_data
         
-        # 각 센서 데이터 수집
+        # 각 센서 DB에서 최신 데이터 조회 (비동기 실행으로 블로킹 방지)
         loop = asyncio.get_event_loop()
         
         # 카메라 데이터
@@ -350,13 +407,20 @@ class SensorManager:
                 print(f"⚠️ Pyrometer 데이터 수집 오류: {e}")
         
         # CNC 데이터
-        if self.connection_status["cnc"] and "cnc" in self.databases:
+        if self.connection_status["cnc"]:
             try:
-                cnc_data = await loop.run_in_executor(
-                    None, self.databases["cnc"].retrieve_data
-                )
-                if cnc_data:
-                    sensor_data["cnc_data"] = cnc_data
+                if self.use_cnc_subprocess and self.cnc_subprocess_manager:
+                    # Subprocess 모드: subprocess manager에서 데이터 가져오기
+                    cnc_data = self.cnc_subprocess_manager.get_latest_data()
+                    if cnc_data:
+                        sensor_data["cnc_data"] = cnc_data
+                elif "cnc" in self.databases and self.databases["cnc"]:
+                    # 직접 DLL 모드: DB에서 데이터 가져오기
+                    cnc_data = await loop.run_in_executor(
+                        None, self.databases["cnc"].retrieve_data
+                    )
+                    if cnc_data:
+                        sensor_data["cnc_data"] = cnc_data
             except Exception as e:
                 print(f"⚠️ CNC 데이터 수집 오류: {e}")
         
@@ -403,6 +467,14 @@ class SensorManager:
     async def cleanup(self):
         """리소스 정리"""
         print("🧹 센서 매니저 정리 중...")
+        
+        # CNC Subprocess 정지
+        if self.cnc_subprocess_manager:
+            try:
+                self.cnc_subprocess_manager.stop()
+                print("✅ CNC subprocess 정지 완료")
+            except Exception as e:
+                print(f"⚠️ CNC subprocess 정지 오류: {e}")
         
         # 모든 컬렉터 정지
         for name, collector in self.collectors.items():

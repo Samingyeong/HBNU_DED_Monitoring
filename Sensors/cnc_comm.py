@@ -137,20 +137,38 @@ class CNC_Collector(threading.Thread):
         self.running = False
 
 if __name__ == "__main__":
-    com = CNCCommunication(config_path="C:/Users/user/Desktop/HBU_monitoring/config/HXApi.ini")
-    db = CNC_DB()
-    collector = CNC_Collector(com, db)
-    collector.start()
-
+    # 프로젝트 루트 기준으로 경로 설정
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(base_path, "config", "HXApi.ini")
+    
+    # 설정 파일이 없으면 기본 경로 시도
+    if not os.path.exists(config_path):
+        # 상대 경로로 시도
+        config_path = os.path.join("config", "HXApi.ini")
+        if not os.path.exists(config_path):
+            print(f"❌ 설정 파일을 찾을 수 없습니다: {config_path}")
+            sys.exit(1)
+    
+    print(f"📁 설정 파일 경로: {config_path}")
+    
     try:
+        com = CNCCommunication(config_path=config_path)
+        db = CNC_DB()
+        collector = CNC_Collector(com, db)
+        collector.start()
+        
+        print("✅ CNC 데이터 수집 시작 (JSON 출력)")
+
         while True:
             if db.data_queue:
                 data = db.retrieve_data()
-                print(json.dumps(data, ensure_ascii=False), flush=True)
+                if data:
+                    print(json.dumps(data, ensure_ascii=False), flush=True)
             time.sleep(0.03)
     except KeyboardInterrupt:
-        print('종료 요청 감지')
+        print('\n종료 요청 감지')
         collector.stop()
     except Exception as e:
         print(f'Error: {e}')
-        collector.stop()
+        if 'collector' in locals():
+            collector.stop()
