@@ -2,8 +2,10 @@
  * 헤더 컴포넌트 - 시스템 제어 및 상태 표시
  */
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useAutoSave } from '../hooks/useAutoSave';
 import { useSensorData } from '../hooks/useSensorData';
+import ConfigViewerModal from './ConfigViewerModal';
 
 interface HeaderProps {
   emergency: boolean;
@@ -16,6 +18,7 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
   const [saveFolderName, setSaveFolderName] = useState('');
   const [tempStorageInfo, setTempStorageInfo] = useState<any>(null);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   
   // 실제 센서 데이터
@@ -59,21 +62,33 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
   useEffect(() => {
     const fetchTempStorageInfo = async () => {
       try {
-        const response = await fetch('http://127.0.0.1:8000/api/save/temp-info');
-        if (response.ok) {
-          const info = await response.json();
-          setTempStorageInfo(info);
+        const response = await axios.get('http://127.0.0.1:8000/api/save/temp-info', {
+          timeout: 3000 // 3초 타임아웃
+        });
+        setTempStorageInfo(response.data);
+      } catch (error: any) {
+        // 404나 503 에러는 정상 (임시 저장 데이터가 없는 경우)
+        if (error.response?.status === 404 || error.response?.status === 503) {
+          setTempStorageInfo(null);
+        } else if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
+          // 연결 거부 에러는 조용히 무시 (백엔드가 아직 시작 안됨)
+          console.warn('⚠️ 백엔드 연결 대기 중...');
+        } else {
+          console.error('임시 저장 정보 조회 실패:', error.message);
         }
-      } catch (error) {
-        console.error('임시 저장 정보 조회 실패:', error);
       }
     };
 
+    // 초기 로드는 1초 지연 (백엔드 초기화 대기)
+    const initialTimeout = setTimeout(fetchTempStorageInfo, 1000);
+    
     // 5초마다 임시 저장 정보 업데이트
     const interval = setInterval(fetchTempStorageInfo, 5000);
-    fetchTempStorageInfo(); // 초기 로드
 
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
   }, []);
 
   // Save Now: 임시저장 중인 데이터를 즉시 디스크에 저장 (자동저장 유지)
@@ -87,18 +102,8 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
         ? { dest_path: inputValue }
         : { folder_name: inputValue || `manual_save_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}` };
 
-      const response = await fetch('http://127.0.0.1:8000/api/save/temp-to-permanent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ 즉시 저장 완료:', result.save_path);
-      } else {
-        console.error('❌ 즉시 저장 실패');
-      }
+      const response = await axios.post('http://127.0.0.1:8000/api/save/temp-to-permanent', body);
+      console.log('✅ 즉시 저장 완료:', response.data.save_path);
     } catch (error) {
       console.error('즉시 저장 중 오류:', error);
     } finally {
@@ -114,24 +119,13 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
       
       const folderName = saveFolderName || `temp_save_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}`;
       
-      const response = await fetch('http://127.0.0.1:8000/api/save/temp-to-permanent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          folder_name: folderName
-        })
+      const response = await axios.post('http://127.0.0.1:8000/api/save/temp-to-permanent', {
+        folder_name: folderName
       });
       
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ 임시 데이터 영구 저장 완료:', result.save_path);
-        setTempStorageInfo(null); // 임시 저장 정보 초기화
-        setSaveFolderName(''); // 폴더명 초기화
-      } else {
-        console.error('❌ 임시 데이터 영구 저장 실패');
-      }
+      console.log('✅ 임시 데이터 영구 저장 완료:', response.data.save_path);
+      setTempStorageInfo(null); // 임시 저장 정보 초기화
+      setSaveFolderName(''); // 폴더명 초기화
     } catch (error) {
       console.error('임시 데이터 저장 실패:', error);
     } finally {
@@ -225,10 +219,9 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
 
           {/* 설정 버튼 */}
           <button 
-            onClick={() => {
-              console.log('설정 버튼 클릭됨');
-            }}
+            onClick={() => setShowConfigModal(true)}
             className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+            title="설정 파일 보기"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -284,6 +277,12 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
           )}
         </div>
       )}
+
+      {/* Config 파일 뷰어 모달 */}
+      <ConfigViewerModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+      />
 
       {/* 연결 상태 모달 */}
       {showConnectionModal && (

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ApiService, WebSocketService, SensorData, SystemStatus, SaveStatus } from '../services/api';
+import { ApiService, wsService, SensorData, SystemStatus, SaveStatus } from '../services/api';
 
 interface UseSensorDataResult {
   isConnected: boolean;
@@ -80,24 +80,26 @@ export const useSensorData = (): UseSensorDataResult => {
     // 초기 데이터 로드
     fetchInitialData();
 
-    // WebSocket 연결 및 이벤트 리스너 등록
-    const wsService = new WebSocketService();
+    // 전역 WebSocket 인스턴스 사용 (이벤트 리스너만 등록)
     wsService.on('sensor_data', handleWebSocketMessage);
     wsService.on('status_update', handleStatusUpdate);
     wsService.on('save_status', handleSaveStatusUpdate);
     wsService.on('connection', handleConnectionStatus);
     wsService.on('error', handleWebSocketError);
 
-    wsService.connect();
+    // 이미 연결되어 있지 않다면 연결
+    if (!wsService.isConnected()) {
+      wsService.connect();
+    }
 
     return () => {
-      // 컴포넌트 언마운트 시 WebSocket 연결 해제 및 리스너 제거
+      // 컴포넌트 언마운트 시 리스너만 제거 (연결은 유지)
       wsService.off('sensor_data', handleWebSocketMessage);
       wsService.off('status_update', handleStatusUpdate);
       wsService.off('save_status', handleSaveStatusUpdate);
       wsService.off('connection', handleConnectionStatus);
       wsService.off('error', handleWebSocketError);
-      wsService.disconnect();
+      // 주의: wsService.disconnect()를 호출하지 않음 (전역 인스턴스이므로)
     };
   }, [fetchInitialData, handleWebSocketMessage, handleStatusUpdate, handleSaveStatusUpdate, handleConnectionStatus, handleWebSocketError]);
 

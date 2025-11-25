@@ -4,7 +4,7 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 // API 기본 설정 (테스트 백엔드 사용)
-const API_BASE_URL = 'http://127.0.0.1:8001';
+const API_BASE_URL = 'http://127.0.0.1:8000';
 
 // Axios 인스턴스 생성
 const apiClient: AxiosInstance = axios.create({
@@ -171,6 +171,22 @@ export class ApiService {
       return false;
     }
   }
+
+  /**
+   * Config 파일 목록 조회
+   */
+  static async getConfigList(): Promise<string[]> {
+    const response = await apiClient.get('/api/config/list');
+    return response.data.files;
+  }
+
+  /**
+   * Config 파일 내용 조회
+   */
+  static async getConfigFile(fileName: string): Promise<{ file_name: string; content: string }> {
+    const response = await apiClient.get(`/api/config/${fileName}`);
+    return response.data;
+  }
 }
 
 // WebSocket 연결 관리
@@ -193,11 +209,18 @@ export class WebSocketService {
    * WebSocket 연결
    */
   connect(): void {
+    // 이미 연결 중이거나 연결되어 있으면 중복 연결 방지
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      console.log('🔗 이미 WebSocket 연결 중이거나 연결됨, 중복 연결 방지');
+      return;
+    }
+    
     try {
-      this.ws = new WebSocket('ws://127.0.0.1:8001/ws');
+      console.log('🔄 WebSocket 연결 시도 중... ws://127.0.0.1:8000/ws');
+      this.ws = new WebSocket('ws://127.0.0.1:8000/ws');
       
       this.ws.onopen = () => {
-        console.log('🔗 WebSocket 연결됨');
+        console.log('✅ WebSocket 연결 성공!');
         this.reconnectAttempts = 0;
         this.emit('connection', { connected: true });
       };
@@ -211,8 +234,9 @@ export class WebSocketService {
         }
       };
 
-      this.ws.onclose = () => {
-        console.log('🔌 WebSocket 연결 해제됨');
+      this.ws.onclose = (event) => {
+        console.log(`🔌 WebSocket 연결 해제됨 (code: ${event.code}, reason: ${event.reason || '없음'})`);
+        this.ws = null;
         this.emit('connection', { connected: false });
         this.handleReconnect();
       };
@@ -224,6 +248,7 @@ export class WebSocketService {
 
     } catch (error) {
       console.error('❌ WebSocket 연결 실패:', error);
+      this.ws = null;
       this.handleReconnect();
     }
   }
@@ -261,7 +286,10 @@ export class WebSocketService {
         this.emit('error', data.message);
         break;
       case 'ping':
-        // 핑 응답은 무시
+        // 서버로부터 ping 수신 시 pong 응답
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+        }
         break;
       default:
         console.log('알 수 없는 WebSocket 메시지 타입:', type);
@@ -272,15 +300,22 @@ export class WebSocketService {
    * 재연결 처리
    */
   private handleReconnect(): void {
+    // 이미 연결 중이거나 연결되어 있으면 재연결하지 않음
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      console.log('🔗 이미 WebSocket 연결 중이거나 연결됨, 재연결 스킵');
+      return;
+    }
+    
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      console.log(`🔄 WebSocket 재연결 시도 ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+      console.log(`🔄 WebSocket 재연결 시도 ${this.reconnectAttempts}/${this.maxReconnectAttempts} (${this.reconnectInterval/1000}초 후)`);
       
       setTimeout(() => {
         this.connect();
       }, this.reconnectInterval);
     } else {
       console.error('❌ WebSocket 최대 재연결 시도 횟수 초과');
+      this.emit('error', { message: 'WebSocket 재연결 실패 - 최대 시도 횟수 초과' });
     }
   }
 

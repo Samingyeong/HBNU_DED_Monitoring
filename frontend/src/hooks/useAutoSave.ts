@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 
 // 개발 환경에서 Electron API mock
 if (process.env.NODE_ENV === 'development' && !window.electronAPI) {
@@ -191,8 +192,14 @@ export const useAutoSave = () => {
     }
   }, [getLogPaths]);
 
-  // 파일 모니터링 시작
+  // 파일 모니터링 시작 (Electron 환경에서만)
   useEffect(() => {
+    // Electron API가 없으면 파일 모니터링 비활성화
+    if (!window.electronAPI) {
+      console.log('⚠️ Electron 환경이 아니므로 자동저장 파일 모니터링 비활성화');
+      return;
+    }
+
     const interval = setInterval(() => {
       checkTraceFile();
       checkExceptionFile();
@@ -204,22 +211,11 @@ export const useAutoSave = () => {
   // 자동저장 시작 시 백엔드에 임시 저장 요청
   const startAutoSaving = useCallback(async (sessionId: string) => {
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/save/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          folder_name: sessionId,
-          auto_save: true
-        })
+      await axios.post('http://127.0.0.1:8000/api/save/start', {
+        folder_name: sessionId,
+        auto_save: true
       });
-      
-      if (response.ok) {
-        console.log('✅ 자동저장 임시 저장 시작됨:', sessionId);
-      } else {
-        console.error('❌ 자동저장 임시 저장 시작 실패');
-      }
+      console.log('✅ 자동저장 임시 저장 시작됨:', sessionId);
     } catch (error) {
       console.error('❌ 자동저장 백엔드 통신 오류:', error);
     }
@@ -228,15 +224,8 @@ export const useAutoSave = () => {
   // 자동저장 중지 시 백엔드에 임시 저장 중지 요청
   const stopAutoSaving = useCallback(async () => {
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/save/temp-stop', {
-        method: 'POST'
-      });
-      
-      if (response.ok) {
-        console.log('✅ 자동저장 임시 저장 중지됨');
-      } else {
-        console.error('❌ 자동저장 임시 저장 중지 실패');
-      }
+      await axios.post('http://127.0.0.1:8000/api/save/temp-stop');
+      console.log('✅ 자동저장 임시 저장 중지됨');
     } catch (error) {
       console.error('❌ 자동저장 백엔드 통신 오류:', error);
     }

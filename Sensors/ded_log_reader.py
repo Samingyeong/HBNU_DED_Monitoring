@@ -122,6 +122,10 @@ class DEDLogReader:
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=1)
+    
+    def stop(self):
+        """stop_monitoring의 별칭 (호환성)"""
+        self.stop_monitoring()
         print("DED 로그 모니터링 중지")
     
     def _monitor_loop(self):
@@ -163,6 +167,63 @@ class DEDLogReader:
             return 'stopped'
         else:
             return 'unknown'
+    
+    def get_all_process_sessions(self):
+        """로그 파일 전체를 분석하여 모든 공정 세션 추출"""
+        current_file = self.get_current_log_file()
+        
+        if not os.path.exists(current_file):
+            return []
+        
+        sessions = []
+        current_session = None
+        
+        try:
+            with open(current_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    event = self.parse_log_line(line)
+                    if not event:
+                        continue
+                    
+                    # 공정 시작
+                    if event['event'] in ['process_start', 'nc_start']:
+                        if current_session is None:
+                            current_session = {
+                                'start_time': event['timestamp'],
+                                'start_datetime': event['datetime'].isoformat(),
+                                'end_time': None,
+                                'end_datetime': None,
+                                'duration': None,
+                                'status': 'running',
+                                'events': []
+                            }
+                        current_session['events'].append(event)
+                    
+                    # 공정 종료
+                    elif event['event'] in ['process_end', 'nc_end']:
+                        if current_session:
+                            current_session['end_time'] = event['timestamp']
+                            current_session['end_datetime'] = event['datetime'].isoformat()
+                            current_session['status'] = 'completed'
+                            
+                            # 시간 차이 계산
+                            start_dt = datetime.strptime(current_session['start_time'], "%Y-%m-%d, %H:%M:%S.%f")
+                            end_dt = event['datetime']
+                            duration = (end_dt - start_dt).total_seconds()
+                            current_session['duration'] = duration
+                            
+                            current_session['events'].append(event)
+                            sessions.append(current_session)
+                            current_session = None
+        
+        except Exception as e:
+            print(f"로그 파일 분석 오류: {e}")
+        
+        # 현재 진행 중인 세션도 포함
+        if current_session:
+            sessions.append(current_session)
+        
+        return sessions
 
 class DEDProcessLogger:
     """공정 이벤트를 CSV로 저장하는 클래스"""

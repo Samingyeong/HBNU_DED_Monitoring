@@ -2,6 +2,7 @@
  * ToolPath 시각화 컴포넌트 - 2D Canvas를 사용한 경로 표시
  */
 import React, { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
 import { useSensorData } from '../hooks/useSensorData';
 
 interface ToolPathProps {
@@ -46,26 +47,15 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       setLoading(true);
       try {
         console.log('NC코드 데이터 로드 시도...');
-        const response = await fetch('http://127.0.0.1:8000/api/nc/path');
-        console.log('응답 상태:', response.status);
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('NC코드 데이터 로드 성공:', data);
-          setNcData(data);
-        } else if (response.status === 404) {
-          // NC코드가 파싱되지 않은 경우 - 데모 데이터 생성
+        const response = await axios.get('http://127.0.0.1:8000/api/nc/path');
+        console.log('NC코드 데이터 로드 성공:', response.data);
+        setNcData(response.data);
+      } catch (error: any) {
+        if (error.response?.status === 404) {
           console.log('NC코드 데이터 없음 (404) - 데모 데이터 생성');
-          const demoData = generateDemoNCPath();
-          setNcData(demoData);
         } else {
-          console.log('응답 오류:', response.status, response.statusText);
-          // 오류 시에도 데모 데이터 생성
-          const demoData = generateDemoNCPath();
-          setNcData(demoData);
+          console.error('NC코드 경로 데이터 로드 실패:', error);
         }
-      } catch (error) {
-        console.error('NC코드 경로 데이터 로드 실패:', error);
         // 오류 시에도 데모 데이터 생성
         const demoData = generateDemoNCPath();
         setNcData(demoData);
