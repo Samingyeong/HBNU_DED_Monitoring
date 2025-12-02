@@ -89,7 +89,7 @@ class LaserDB:
     def retrieve_data(self):
         if self.data_queue:
             return self.data_queue[-1]
-        return print("Test Data queue is empty")
+        return None  # 큐가 비어있으면 None 반환 (정상 동작)
 
 class IPG_Collector(threading.Thread):
     def __init__(self, com, db):

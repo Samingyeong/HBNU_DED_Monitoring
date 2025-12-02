@@ -61,13 +61,15 @@ class CNCCommunication:
     def open(self):
         ip = self.address['ip'].split('.')
         port = int(self.address['port'])
+        print(f"[CNC] HxInitialize2 호출 중... IP: {'.'.join(ip)}, Port: {port}")
         res = self.hx.HxInitialize2(0, int(ip[0]), int(ip[1]), int(ip[2]), int(ip[3]), port)
+        print(f"[CNC] HxInitialize2 결과: {res}")
         if res:
             self.activate = True
-            print(f"API 초기화 및 연결 성공: {res}")
+            print(f"[OK] CNC API 초기화 및 연결 성공 - activate=True")
         else:
             self.activate = False
-            print("HXApi 연결 실패")
+            print("[ERROR] CNC HXApi 연결 실패 - activate=False")
 
     def get_pos_data(self):
         if not self.activate:
@@ -110,8 +112,7 @@ class CNC_DB:
     def retrieve_data(self):
         if self.data_queue:
             return self.data_queue[-1]
-        print("Test Data queue is empty")
-        return None
+        return None  # 큐가 비어있으면 None 반환 (정상 동작)
 
 class CNC_Collector(threading.Thread):
     def __init__(self, com, db, sample_rate=100):

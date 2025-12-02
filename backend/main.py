@@ -36,7 +36,7 @@ from backend.websocket_manager import WebSocketManager
 # DED Log Reader 임포트
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "Sensors"))
 try:
-    from ded_log_reader import DEDLogReader
+    from ded_log_reader import DEDLogReader  # type: ignore
     DED_LOG_AVAILABLE = True
     logger.info("✅ DED Log Reader 모듈 임포트 성공")
 except ImportError as e:
@@ -112,14 +112,16 @@ async def lifespan(app: FastAPI):
     websocket_manager = WebSocketManager()
     logger.info("✅ WebSocket 매니저 초기화 완료")
     
-    # DED Log Reader 초기화
+    # DED Log Reader 초기화 (선택적 - Trace/Exception 파일이 없어도 센서는 작동)
     if DED_LOG_AVAILABLE:
         try:
             logger.info("📋 DED Log Reader 초기화 중...")
             ded_log_reader = DEDLogReader()
             logger.info("✅ DED Log Reader 초기화 완료")
+            logger.info("   ℹ️  공정 시작 시 Trace/Exception 파일을 자동으로 읽습니다")
         except Exception as e:
-            logger.error(f"❌ DED Log Reader 초기화 실패: {e}")
+            logger.warning(f"⚠️ DED Log Reader 초기화 실패: {e}")
+            logger.info("   ℹ️  센서 데이터는 정상적으로 수집됩니다 (Trace/Exception 파일 없음)")
             ded_log_reader = None
     
     # 데이터 수집 태스크 시작
