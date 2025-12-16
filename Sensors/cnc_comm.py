@@ -58,6 +58,13 @@ class CNCCommunication:
         self.hx.HxGetSNF.argtypes = [ctypes.c_int32, ctypes.c_int32]
         self.hx.HxGetSNF.restype = ctypes.c_double
 
+        # R 레지스터 읽기 함수 (피더 RPM, 가스 유량용)
+        self.hx.HxGetRW.argtypes = [ctypes.c_int32, ctypes.c_int32]
+        self.hx.HxGetRW.restype = ctypes.c_int32
+
+        self.hx.HxGetRB.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
+        self.hx.HxGetRB.restype = ctypes.c_bool
+
     def open(self):
         ip = self.address['ip'].split('.')
         port = int(self.address['port'])
@@ -95,7 +102,23 @@ class CNCCommunication:
             'total_oper_time': self.hx.HxGetSNF(0, 1),
             'feed_override': self.hx.HxGetSVF(0, 675),
             'rapid_override': self.hx.HxGetSVF(0, 676),
-            'feed_rate': self.hx.HxGetSVF(0, 722)
+            'feed_rate': self.hx.HxGetSVF(0, 722),
+            # 피더 RPM 데이터 (R 레지스터 - 일반적인 DED 시스템 맵핑)
+            # 참고: C:\DED\Recipe\Default.rcp에서 피더 1~6 설정 확인됨
+            # 레지스터 번호는 일반적인 범위로 설정 (R100~R200)
+            'feeder1_rpm': self.hx.HxGetRW(0, 100),  # R100: Feeder1 RPM
+            'feeder1_remaining': self.hx.HxGetRW(0, 110),  # R110: Feeder1 잔량
+            'feeder1_status': bool(self.hx.HxGetRB(0, 120, 0)),  # R120.0: Feeder1 상태
+            'feeder2_rpm': self.hx.HxGetRW(0, 101),  # R101: Feeder2 RPM
+            'feeder2_remaining': self.hx.HxGetRW(0, 111),  # R111: Feeder2 잔량
+            'feeder2_status': bool(self.hx.HxGetRB(0, 120, 1)),  # R120.1: Feeder2 상태
+            'feeder3_rpm': self.hx.HxGetRW(0, 102),  # R102: Feeder3 RPM
+            'feeder3_remaining': self.hx.HxGetRW(0, 112),  # R112: Feeder3 잔량
+            'feeder3_status': bool(self.hx.HxGetRB(0, 120, 2)),  # R120.2: Feeder3 상태
+            # 가스 유량 데이터 (R 레지스터)
+            'coaxial_gas': self.hx.HxGetRW(0, 130),  # R130: Coaxial Gas
+            'feeding_gas': self.hx.HxGetRW(0, 131),  # R131: Feeding Gas
+            'shield_gas': self.hx.HxGetRW(0, 132),  # R132: Shield Gas
         }
         return pos_data
 

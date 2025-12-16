@@ -103,6 +103,22 @@ class CameraCollector(threading.Thread):
         self.sample_rate = sample_rate
         self.save_interval = save_interval
         self.last_save = 0
+        self.save_dir = None  # 저장 경로 (None이면 저장 안 함)
+        self._lock = threading.Lock()
+
+    def set_save_dir(self, save_dir: str):
+        """이미지 저장 경로 설정 (공정 시작 시 호출)"""
+        with self._lock:
+            self.save_dir = save_dir
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
+                print(f"[Basler] 이미지 저장 경로 설정: {save_dir}")
+    
+    def stop_saving(self):
+        """이미지 저장 중지 (공정 종료 시 호출)"""
+        with self._lock:
+            self.save_dir = None
+            print("[Basler] 이미지 저장 중지")
 
     def run(self):
         while self.running:
@@ -113,15 +129,18 @@ class CameraCollector(threading.Thread):
                 data = {"image": frame, "melt_pool_area": area}
                 self.db.store_data(data)
 
-                now = time.time()
-                if now - self.last_save >= self.save_interval:
-                    timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    folder = "captures_basler"
-                    os.makedirs(folder, exist_ok=True)
-                    filename = os.path.join(folder, f"basler_{timestamp}.png")
-                    cv2.imwrite(filename, frame)
-                    print(f"[Basler SAVE] {filename}")
-                    self.last_save = now
+                # 이미지 저장 (save_dir이 설정되어 있을 때만, 1초 간격)
+                with self._lock:
+                    current_save_dir = self.save_dir
+                
+                if current_save_dir:
+                    now = time.time()
+                    if now - self.last_save >= self.save_interval:
+                        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                        filename = os.path.join(current_save_dir, f"basler_{timestamp}.png")
+                        cv2.imwrite(filename, frame)
+                        print(f"[Basler SAVE] {filename}")
+                        self.last_save = now
 
             sleep_time = max(0, (1/self.sample_rate) - (time.perf_counter() - loop_start))
             time.sleep(sleep_time)

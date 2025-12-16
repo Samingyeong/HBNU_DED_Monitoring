@@ -1,27 +1,35 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-// 개발 환경에서 Electron API mock
+const API_BASE_URL = 'http://127.0.0.1:8000';
+
+// 개발 환경에서 Electron API mock - 백엔드 API를 통해 파일 읽기
 if (process.env.NODE_ENV === 'development' && !window.electronAPI) {
   window.electronAPI = {
     readLogFile: async (filePath: string) => {
       try {
-        // 개발 환경에서는 fetch를 사용하여 파일 읽기 시뮬레이션
-        const response = await fetch(`file://${filePath}`);
-        if (response.ok) {
-          const content = await response.text();
-          return { success: true, content };
+        // 개발 환경에서는 백엔드 API를 통해 파일 읽기
+        const response = await axios.post(`${API_BASE_URL}/api/file/read`, {
+          file_path: filePath
+        }, { timeout: 3000 });
+        
+        if (response.data?.success) {
+          return { success: true, content: response.data.content };
         } else {
-          return { success: false, error: 'File not found' };
+          return { success: false, error: response.data?.error || 'File not found' };
         }
       } catch (error: any) {
-        return { success: false, error: error.message };
+        // 백엔드 연결 실패 시 조용히 실패 (개발 환경에서는 정상)
+        console.debug('📁 파일 읽기 스킵 (백엔드 미연결):', filePath);
+        return { success: false, error: 'Backend not available' };
       }
     },
     checkFileExists: async (filePath: string) => {
       try {
-        const response = await fetch(`file://${filePath}`, { method: 'HEAD' });
-        return response.ok;
+        const response = await axios.post(`${API_BASE_URL}/api/file/exists`, {
+          file_path: filePath
+        }, { timeout: 3000 });
+        return response.data?.exists || false;
       } catch {
         return false;
       }

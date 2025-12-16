@@ -292,3 +292,12 @@ backend/images/
 
 # Python/Node environments (already common, ensure root venv too)
 venv/
+
+# Camera captures (이미지 캡처 폴더)
+captures_basler/
+captures_hik/
+test_basler.png
+test_*.png
+
+# DED Recipe files (레시피 파일은 로컬에서만 관리)
+Sensors/DED_Recipe_*.rcp

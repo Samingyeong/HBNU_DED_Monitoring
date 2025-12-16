@@ -32,7 +32,7 @@ interface CNCData {
 }
 
 export default function CNCStatus() {
-  const { latestData } = useSensorData();
+  const { latestData, systemStatus } = useSensorData();
 
   // 실제 CNC 데이터 또는 기본값
   const cncData: CNCData = latestData?.cnc_data || {
@@ -145,7 +145,7 @@ export default function CNCStatus() {
               { name: 'Laser', key: 'laser' },
               { name: 'CNC', key: 'cnc' }
             ].map((sensor) => {
-              const status = (latestData as any)?.systemStatus?.sensors?.[sensor.key] || false;
+              const status = systemStatus?.sensors?.[sensor.key as keyof typeof systemStatus.sensors] || false;
               return (
                 <div key={sensor.key} className="flex justify-between items-center text-xs">
                   <span className="text-gray-700">{sensor.name}</span>

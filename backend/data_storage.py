@@ -140,8 +140,9 @@ class DataStorage:
         """이미지 저장 (비동기)"""
         try:
             # Basler 카메라 이미지 저장
+            outpower = data.get("outpower")
             if (data.get("image_available") and 
-                data.get("outpower", 0) > 10 and
+                outpower is not None and outpower > 10 and
                 self.image_save_dir):
                 
                 # 이미지 데이터 가져오기 (실제 구현에서는 sensor_manager에서 가져와야 함)

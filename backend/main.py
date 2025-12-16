@@ -8,13 +8,16 @@ import asyncio
 import json
 import time
 import logging
+import io
+import cv2
+import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -307,6 +310,7 @@ async def get_data_history(limit: int = 100):
 @app.post("/api/save/start")
 async def start_saving(request: SaveRequest):
     """데이터 저장 시작 (수동 저장)"""
+    global sensor_manager
     logger.info(f"💾 저장 시작 요청: folder={request.folder_name}")
     
     if not data_storage:
@@ -327,6 +331,13 @@ async def start_saving(request: SaveRequest):
         else:
             save_path = await data_storage.start_saving(request.folder_name)
             logger.info(f"✅ 데이터 저장 시작됨: {save_path}")
+            
+            # Basler 카메라 이미지 저장 시작 (공정 폴더 안에 basler_images 폴더)
+            if sensor_manager and "camera" in sensor_manager.collectors:
+                basler_save_dir = os.path.join(save_path, "basler_images")
+                sensor_manager.collectors["camera"].set_save_dir(basler_save_dir)
+                logger.info(f"📷 Basler 이미지 저장 시작: {basler_save_dir}")
+            
             return {
                 "message": "데이터 저장이 시작되었습니다",
                 "save_path": save_path,
@@ -341,11 +352,18 @@ async def start_saving(request: SaveRequest):
 @app.post("/api/save/stop")
 async def stop_saving():
     """데이터 저장 중지"""
+    global sensor_manager
     if not data_storage:
         raise HTTPException(status_code=503, detail="데이터 스토리지가 초기화되지 않았습니다")
     
     try:
         await data_storage.stop_saving()
+        
+        # Basler 카메라 이미지 저장 중지
+        if sensor_manager and "camera" in sensor_manager.collectors:
+            sensor_manager.collectors["camera"].stop_saving()
+            logger.info("📷 Basler 이미지 저장 중지")
+        
         return {
             "message": "데이터 저장이 중지되었습니다",
             "timestamp": datetime.now().isoformat()
@@ -422,14 +440,132 @@ async def get_save_status():
 
 @app.get("/api/images/{image_type}")
 async def get_image(image_type: str):
-    """이미지 파일 조회 (카메라, HikRobot 등)"""
-    # 이미지 파일 경로 생성
-    image_path = f"backend/images/{image_type}_latest.png"
+    """실시간 카메라 이미지 조회 (Basler, HikRobot) - 단일 프레임"""
+    global sensor_manager
     
-    if os.path.exists(image_path):
-        return FileResponse(image_path)
-    else:
-        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다")
+    if sensor_manager is None:
+        raise HTTPException(status_code=503, detail="센서 매니저가 초기화되지 않았습니다")
+    
+    try:
+        if image_type == "basler":
+            # Basler 카메라에서 실시간 이미지 가져오기
+            if sensor_manager.connection_status.get("camera") and "camera" in sensor_manager.databases:
+                camera_data = sensor_manager.databases["camera"].retrieve_data()
+                if camera_data and camera_data.get("image") is not None:
+                    image = camera_data["image"]
+                    # numpy array를 JPEG로 인코딩 (PNG보다 빠름)
+                    _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    return StreamingResponse(
+                        io.BytesIO(buffer.tobytes()),
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                    )
+            raise HTTPException(status_code=404, detail="Basler 카메라 이미지를 사용할 수 없습니다")
+        
+        elif image_type == "hik":
+            # HikRobot 카메라에서 실시간 이미지 가져오기
+            if (sensor_manager.connection_status.get("hik_camera_1") and 
+                sensor_manager.connection_status.get("hik_camera_2")):
+                hik_data = sensor_manager._get_combined_hik_image()
+                if hik_data and hik_data.get("combined_image") is not None:
+                    image = hik_data["combined_image"]
+                    _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    return StreamingResponse(
+                        io.BytesIO(buffer.tobytes()),
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                    )
+            raise HTTPException(status_code=404, detail="HikRobot 카메라 이미지를 사용할 수 없습니다")
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"알 수 없는 이미지 타입: {image_type}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"이미지 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"이미지 조회 실패: {str(e)}")
+
+
+def generate_mjpeg_frames(image_type: str):
+    """MJPEG 스트리밍용 프레임 제너레이터 (실시간 영상 스트리밍)"""
+    global sensor_manager
+    
+    FRAME_INTERVAL = 0.033  # ~30fps (33ms)
+    JPEG_QUALITY = 75  # 품질 (속도 vs 품질 균형)
+    
+    while True:
+        try:
+            frame = None
+            
+            if image_type == "basler":
+                if (sensor_manager and 
+                    sensor_manager.connection_status.get("camera") and 
+                    "camera" in sensor_manager.databases):
+                    camera_data = sensor_manager.databases["camera"].retrieve_data()
+                    if camera_data and camera_data.get("image") is not None:
+                        frame = camera_data["image"]
+            
+            elif image_type == "hik":
+                if (sensor_manager and 
+                    sensor_manager.connection_status.get("hik_camera_1") and 
+                    sensor_manager.connection_status.get("hik_camera_2")):
+                    hik_data = sensor_manager._get_combined_hik_image()
+                    if hik_data and hik_data.get("combined_image") is not None:
+                        frame = hik_data["combined_image"]
+            
+            if frame is not None:
+                # JPEG로 인코딩 (PNG보다 훨씬 빠름)
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                frame_bytes = buffer.tobytes()
+                
+                # MJPEG 프레임 형식으로 yield
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            else:
+                # 프레임이 없으면 짧은 대기 후 재시도
+                time.sleep(0.1)
+                continue
+            
+            # 프레임 간격 유지 (30fps)
+            time.sleep(FRAME_INTERVAL)
+            
+        except Exception as e:
+            logger.warning(f"MJPEG 프레임 생성 오류: {e}")
+            time.sleep(0.1)
+
+
+@app.get("/api/stream/{image_type}")
+async def stream_video(image_type: str):
+    """MJPEG 실시간 비디오 스트리밍 (자연스러운 영상)"""
+    global sensor_manager
+    
+    if sensor_manager is None:
+        raise HTTPException(status_code=503, detail="센서 매니저가 초기화되지 않았습니다")
+    
+    if image_type not in ["basler", "hik"]:
+        raise HTTPException(status_code=400, detail=f"알 수 없는 이미지 타입: {image_type}")
+    
+    # 카메라 연결 상태 확인
+    if image_type == "basler" and not sensor_manager.connection_status.get("camera"):
+        raise HTTPException(status_code=404, detail="Basler 카메라가 연결되지 않았습니다")
+    
+    if image_type == "hik" and not (sensor_manager.connection_status.get("hik_camera_1") and 
+                                     sensor_manager.connection_status.get("hik_camera_2")):
+        raise HTTPException(status_code=404, detail="HikRobot 카메라가 연결되지 않았습니다")
+    
+    logger.info(f"📹 MJPEG 스트리밍 시작: {image_type}")
+    
+    return StreamingResponse(
+        generate_mjpeg_frames(image_type),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive"
+        }
+    )
 
 
 @app.get("/api/config/list")
@@ -551,6 +687,62 @@ async def get_current_ded_log():
 
 
 ## NC 기능 제거: 관련 모델 및 엔드포인트 삭제
+
+
+# 파일 읽기 요청 모델
+class FileReadRequest(BaseModel):
+    """파일 읽기 요청 모델"""
+    file_path: str
+
+
+class FileExistsRequest(BaseModel):
+    """파일 존재 확인 요청 모델"""
+    file_path: str
+
+
+@app.post("/api/file/read")
+async def read_file(request: FileReadRequest):
+    """로컬 파일 읽기 (Trace/Exception 파일 모니터링용)"""
+    try:
+        file_path = request.file_path
+        
+        # 보안: 허용된 경로만 읽기 (DED 로그 경로)
+        allowed_paths = ['C:\\DED\\Log', 'D:\\DED\\Log', 'C:/DED/Log', 'D:/DED/Log']
+        is_allowed = any(file_path.startswith(p) or file_path.replace('/', '\\').startswith(p) for p in allowed_paths)
+        
+        if not is_allowed:
+            logger.warning(f"⚠️ 허용되지 않은 파일 경로 요청: {file_path}")
+            return {"success": False, "error": "Access denied - path not allowed"}
+        
+        if not os.path.exists(file_path):
+            return {"success": False, "error": "File not found"}
+        
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        return {"success": True, "content": content}
+    except Exception as e:
+        logger.error(f"❌ 파일 읽기 실패: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/file/exists")
+async def check_file_exists(request: FileExistsRequest):
+    """파일 존재 여부 확인"""
+    try:
+        file_path = request.file_path
+        
+        # 보안: 허용된 경로만 확인
+        allowed_paths = ['C:\\DED\\Log', 'D:\\DED\\Log', 'C:/DED/Log', 'D:/DED/Log']
+        is_allowed = any(file_path.startswith(p) or file_path.replace('/', '\\').startswith(p) for p in allowed_paths)
+        
+        if not is_allowed:
+            return {"exists": False}
+        
+        return {"exists": os.path.exists(file_path)}
+    except Exception as e:
+        logger.error(f"❌ 파일 존재 확인 실패: {e}")
+        return {"exists": False}
 
 
 @app.websocket("/ws")
