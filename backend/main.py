@@ -15,6 +15,10 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
 
+# 환경변수 로드 (가장 먼저!)
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -22,6 +26,12 @@ from pydantic import BaseModel
 
 # NC코드 파서 임포트 (같은 폴더 내 모듈)
 from gcode_parser import NCParser
+
+# 상태 머신, 이벤트 감지기, Slack 알림 모듈
+from state.machine_state import MachineState, MachineStateManager, determine_state_from_sensor_data
+from events.event_detector import EventDetector, EventType, Event
+from notifier.slack import SlackNotifier, get_slack_notifier
+
 import uvicorn
 
 # 로깅 설정
@@ -77,11 +87,17 @@ ded_log_reader: Optional['DEDLogReader'] = None
 nc_parser: NCParser = NCParser()
 nc_path_data: Optional[Dict] = None  # 현재 파싱된 NC코드 경로 데이터
 
+# 상태 머신 & Slack 알림 (전역 인스턴스)
+machine_state_manager: Optional[MachineStateManager] = None
+event_detector: Optional[EventDetector] = None
+slack_notifier: Optional[SlackNotifier] = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     global sensor_manager, data_storage, websocket_manager, ded_log_reader
+    global machine_state_manager, event_detector, slack_notifier
     
     logger.info("=" * 80)
     logger.info("🚀 HBNU DED 모니터링 백엔드 서버 시작 중...")
@@ -134,6 +150,37 @@ async def lifespan(app: FastAPI):
             logger.info("   ℹ️  센서 데이터는 정상적으로 수집됩니다 (Trace/Exception 파일 없음)")
             ded_log_reader = None
     
+    # ============================================
+    # 상태 머신 & Slack 알림 시스템 초기화
+    # ============================================
+    logger.info("🔧 상태 머신 초기화 중...")
+    machine_state_manager = MachineStateManager(initial_state=MachineState.IDLE)
+    
+    # 이벤트 감지기 초기화 (쿨다운 시간 환경변수에서 로드)
+    cooldown_seconds = int(os.getenv("SLACK_COOLDOWN_SECONDS", "300"))
+    event_detector = EventDetector(cooldown_seconds=cooldown_seconds)
+    logger.info(f"✅ 이벤트 감지기 초기화 완료 (쿨다운: {cooldown_seconds}초)")
+    
+    # Slack 알림기 초기화
+    slack_notifier = SlackNotifier.from_env()
+    
+    # 상태 전이 시 이벤트 감지 → Slack 알림 콜백 등록
+    def on_state_transition(transition):
+        """상태 전이 시 이벤트 감지 및 Slack 알림"""
+        event = event_detector.detect_event(
+            from_state=transition.from_state.value,
+            to_state=transition.to_state.value,
+            reason=transition.reason,
+            metadata=transition.metadata
+        )
+        
+        if event and slack_notifier:
+            # 비동기로 Slack 알림 전송 (이벤트 루프에서)
+            asyncio.create_task(slack_notifier.send_event(event))
+    
+    machine_state_manager.on_transition(on_state_transition)
+    logger.info("✅ 상태 머신 & Slack 알림 시스템 초기화 완료")
+    
     # 데이터 수집 태스크 시작
     logger.info("🔄 데이터 수집 태스크 시작 중...")
     data_collection_task = asyncio.create_task(collect_sensor_data())
@@ -149,6 +196,12 @@ async def lifespan(app: FastAPI):
     # 정리 작업
     logger.info("=" * 80)
     logger.info("🛑 백엔드 서버 종료 중...")
+    
+    # Slack 알림기 리소스 정리
+    if slack_notifier:
+        await slack_notifier.close()
+        logger.info("📢 Slack 알림기 종료")
+    
     data_collection_task.cancel()
     if sensor_manager:
         logger.info("🔧 센서 매니저 정리 중...")
@@ -317,8 +370,22 @@ async def get_data_history(limit: int = 100):
 @app.post("/api/save/start")
 async def start_saving(request: SaveRequest):
     """데이터 저장 시작 (수동 저장)"""
-    global sensor_manager
+    global sensor_manager, machine_state_manager
     logger.info(f"💾 저장 시작 요청: folder={request.folder_name}")
+    
+    # 상태 전이: IDLE/STOPPED → STARTING → RUNNING
+    if machine_state_manager:
+        machine_state_manager.transition_to(
+            MachineState.STARTING,
+            reason="공정 시작 요청",
+            metadata={"folder_name": request.folder_name, "auto_save": request.auto_save}
+        )
+        # STARTING → RUNNING (바로 전이)
+        machine_state_manager.transition_to(
+            MachineState.RUNNING,
+            reason="공정 시작됨",
+            metadata={"folder_name": request.folder_name}
+        )
     
     if not data_storage:
         logger.error("데이터 스토리지가 초기화되지 않음")
@@ -359,12 +426,30 @@ async def start_saving(request: SaveRequest):
 @app.post("/api/save/stop")
 async def stop_saving():
     """데이터 저장 중지"""
-    global sensor_manager
+    global sensor_manager, machine_state_manager
     if not data_storage:
         raise HTTPException(status_code=503, detail="데이터 스토리지가 초기화되지 않았습니다")
     
+    # 상태 전이: RUNNING → STOPPING → STOPPED
+    if machine_state_manager:
+        machine_state_manager.transition_to(
+            MachineState.STOPPING,
+            reason="공정 종료 요청"
+        )
+    
     try:
         await data_storage.stop_saving()
+        
+        # 상태 전이: STOPPING → STOPPED → IDLE
+        if machine_state_manager:
+            machine_state_manager.transition_to(
+                MachineState.STOPPED,
+                reason="공정 정상 종료"
+            )
+            machine_state_manager.transition_to(
+                MachineState.IDLE,
+                reason="대기 상태로 복귀"
+            )
         
         # Basler 카메라 이미지 저장 중지
         if sensor_manager and "camera" in sensor_manager.collectors:
@@ -944,6 +1029,175 @@ async def check_file_exists(request: FileExistsRequest):
     except Exception as e:
         logger.error(f"❌ 파일 존재 확인 실패: {e}")
         return {"exists": False}
+
+
+# ============================================================
+# Slack 알림 관련 API 엔드포인트
+# ============================================================
+
+@app.get("/api/slack/status")
+async def get_slack_status():
+    """Slack 알림 상태 조회"""
+    if not slack_notifier:
+        return {
+            "success": False,
+            "enabled": False,
+            "message": "Slack 알림이 초기화되지 않았습니다"
+        }
+    
+    stats = slack_notifier.get_stats()
+    return {
+        "success": True,
+        **stats,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.post("/api/slack/test")
+async def send_test_slack():
+    """Slack 테스트 메시지 전송"""
+    if not slack_notifier:
+        raise HTTPException(status_code=503, detail="Slack 알림이 초기화되지 않았습니다")
+    
+    success = await slack_notifier.send_test_message()
+    
+    if success:
+        return {
+            "success": True,
+            "message": "테스트 메시지가 전송되었습니다",
+            "timestamp": datetime.now().isoformat()
+        }
+    else:
+        raise HTTPException(status_code=500, detail="테스트 메시지 전송 실패")
+
+
+class SlackSettingsRequest(BaseModel):
+    """Slack 설정 변경 요청"""
+    enabled: Optional[bool] = None
+
+
+@app.post("/api/slack/settings")
+async def update_slack_settings(request: SlackSettingsRequest):
+    """Slack 알림 설정 변경 (ON/OFF)"""
+    if not slack_notifier:
+        raise HTTPException(status_code=503, detail="Slack 알림이 초기화되지 않았습니다")
+    
+    if request.enabled is not None:
+        slack_notifier._config.enabled = request.enabled
+        status = "활성화" if request.enabled else "비활성화"
+        logger.info(f"📢 Slack 알림 {status}됨")
+    
+    return {
+        "success": True,
+        "enabled": slack_notifier._config.enabled,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# ============================================================
+# 상태 머신 관련 API 엔드포인트
+# ============================================================
+
+@app.get("/api/state/current")
+async def get_current_state():
+    """현재 장비 상태 조회"""
+    if not machine_state_manager:
+        return {
+            "success": False,
+            "message": "상태 머신이 초기화되지 않았습니다"
+        }
+    
+    return {
+        "success": True,
+        **machine_state_manager.to_dict(),
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api/state/history")
+async def get_state_history(limit: int = 10):
+    """상태 전이 이력 조회"""
+    if not machine_state_manager:
+        return {
+            "success": False,
+            "message": "상태 머신이 초기화되지 않았습니다"
+        }
+    
+    history = machine_state_manager.get_history(limit)
+    return {
+        "success": True,
+        "history": [
+            {
+                "from_state": t.from_state.value,
+                "to_state": t.to_state.value,
+                "timestamp": t.timestamp.isoformat(),
+                "reason": t.reason
+            }
+            for t in history
+        ],
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api/events/history")
+async def get_event_history(limit: int = 10):
+    """이벤트 이력 조회"""
+    if not event_detector:
+        return {
+            "success": False,
+            "message": "이벤트 감지기가 초기화되지 않았습니다"
+        }
+    
+    return {
+        "success": True,
+        "events": event_detector.get_history(limit),
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+class ManualStateRequest(BaseModel):
+    """수동 상태 변경 요청"""
+    state: str
+    reason: Optional[str] = None
+
+
+@app.post("/api/state/manual")
+async def set_manual_state(request: ManualStateRequest):
+    """수동 상태 변경 (비상 시 사용)"""
+    if not machine_state_manager:
+        raise HTTPException(status_code=503, detail="상태 머신이 초기화되지 않았습니다")
+    
+    # 문자열을 MachineState enum으로 변환
+    try:
+        new_state = MachineState(request.state)
+    except ValueError:
+        valid_states = [s.value for s in MachineState]
+        raise HTTPException(
+            status_code=400, 
+            detail=f"유효하지 않은 상태입니다. 가능한 값: {valid_states}"
+        )
+    
+    # 강제 상태 전이 (유효성 검사 무시)
+    transition = machine_state_manager.transition_to(
+        new_state,
+        reason=request.reason or "수동 상태 변경",
+        force=True
+    )
+    
+    if transition:
+        return {
+            "success": True,
+            "message": f"상태가 {new_state.value}로 변경되었습니다",
+            "from_state": transition.from_state.value,
+            "to_state": transition.to_state.value,
+            "timestamp": datetime.now().isoformat()
+        }
+    else:
+        return {
+            "success": False,
+            "message": "상태 변경에 실패했습니다 (동일한 상태)",
+            "current_state": machine_state_manager.current_state.value
+        }
 
 
 @app.websocket("/ws")

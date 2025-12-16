@@ -19,5 +19,8 @@ asyncio-mqtt==0.16.1
 # 설정 관리
 python-dotenv==1.0.0
 
+# HTTP 클라이언트 (Slack Webhook)
+aiohttp==3.9.1
+
 # 로깅
 loguru==0.7.2
