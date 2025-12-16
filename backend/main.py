@@ -15,10 +15,13 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+
+# NC코드 파서 임포트 (같은 폴더 내 모듈)
+from gcode_parser import NCParser
 import uvicorn
 
 # 로깅 설정
@@ -69,6 +72,10 @@ sensor_manager: Optional[SensorManager] = None
 data_storage: Optional[DataStorage] = None
 websocket_manager: Optional[WebSocketManager] = None
 ded_log_reader: Optional['DEDLogReader'] = None
+
+# NC코드 파서 (전역 인스턴스)
+nc_parser: NCParser = NCParser()
+nc_path_data: Optional[Dict] = None  # 현재 파싱된 NC코드 경로 데이터
 
 
 @asynccontextmanager
@@ -686,7 +693,201 @@ async def get_current_ded_log():
         raise HTTPException(status_code=500, detail=f"현재 DED 로그 조회 실패: {str(e)}")
 
 
-## NC 기능 제거: 관련 모델 및 엔드포인트 삭제
+# ============================================================
+# NC코드 관련 API 엔드포인트
+# ============================================================
+
+@app.post("/api/nc/upload")
+async def upload_nc_file(file: UploadFile = File(...)):
+    """NC코드 파일 업로드 및 파싱"""
+    global nc_parser, nc_path_data
+    
+    logger.info(f"📤 NC코드 파일 업로드: {file.filename}")
+    
+    # 파일 확장자 검증
+    allowed_extensions = ['.nc', '.txt', '.tap', '.cnc', '.gcode']
+    file_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ''
+    
+    if file_ext not in allowed_extensions:
+        logger.warning(f"⚠️ 지원하지 않는 파일 형식: {file_ext}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"지원하지 않는 파일 형식입니다. 지원 형식: {', '.join(allowed_extensions)}"
+        )
+    
+    try:
+        # 파일 내용 읽기
+        content = await file.read()
+        
+        # 다양한 인코딩으로 디코딩 시도
+        decoded_content = None
+        encodings = ['utf-8', 'cp949', 'euc-kr', 'latin-1']
+        
+        for encoding in encodings:
+            try:
+                decoded_content = content.decode(encoding)
+                logger.info(f"✅ 파일 디코딩 성공: {encoding}")
+                break
+            except UnicodeDecodeError:
+                continue
+        
+        if decoded_content is None:
+            raise HTTPException(status_code=400, detail="파일 인코딩을 읽을 수 없습니다")
+        
+        # NC코드 파싱
+        nc_parser = NCParser()  # 새 파서 인스턴스 생성
+        result = nc_parser.parse_content(decoded_content)
+        
+        if result.get("success"):
+            nc_path_data = result
+            logger.info(f"✅ NC코드 파싱 완료: {result['total_points']}개 포인트")
+            
+            return {
+                "success": True,
+                "message": "NC코드 파일이 성공적으로 업로드되었습니다",
+                "file_name": file.filename,
+                "total_lines": result.get("total_lines", 0),
+                "total_points": result.get("total_points", 0),
+                "bounds": result.get("bounds", {}),
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error", "파싱 실패"))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ NC코드 파일 처리 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"파일 처리 실패: {str(e)}")
+
+
+@app.get("/api/nc/path")
+async def get_nc_path():
+    """현재 파싱된 NC코드 경로 데이터 조회"""
+    global nc_path_data
+    
+    if nc_path_data is None:
+        logger.debug("NC코드 경로 데이터 없음")
+        raise HTTPException(status_code=404, detail="NC코드 데이터가 없습니다. 파일을 먼저 업로드해주세요.")
+    
+    return nc_path_data
+
+
+@app.delete("/api/nc/clear")
+async def clear_nc_data():
+    """NC코드 데이터 초기화"""
+    global nc_parser, nc_path_data
+    
+    nc_parser = NCParser()
+    nc_path_data = None
+    
+    logger.info("🗑️ NC코드 데이터 초기화됨")
+    
+    return {
+        "success": True,
+        "message": "NC코드 데이터가 초기화되었습니다",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api/nc/progress")
+async def get_nc_progress():
+    """현재 CNC 좌표 기반 NC코드 진행률 계산 (백엔드에서 모든 계산 수행)"""
+    global nc_parser, nc_path_data, data_storage
+    
+    if nc_path_data is None:
+        return {
+            "success": False,
+            "has_nc_data": False,
+            "progress": 0,
+            "message": "NC코드 데이터가 없습니다"
+        }
+    
+    path_points = nc_path_data.get("path_points", [])
+    total_points = len(path_points)
+    
+    if total_points == 0:
+        return {
+            "success": False,
+            "has_nc_data": True,
+            "progress": 0,
+            "message": "경로 포인트가 없습니다"
+        }
+    
+    try:
+        # 최신 CNC 좌표 가져오기
+        latest_data = data_storage.get_latest_data() if data_storage else None
+        
+        current_x = 0.0
+        current_y = 0.0
+        current_z = 0.0
+        has_cnc_data = False
+        closest_index = 0
+        
+        if latest_data and latest_data.get("cnc_data"):
+            cnc_data = latest_data["cnc_data"]
+            current_x = cnc_data.get("curpos_x", 0) or 0
+            current_y = cnc_data.get("curpos_y", 0) or 0
+            current_z = cnc_data.get("curpos_z", 0) or 0
+            has_cnc_data = True
+            
+            # 현재 위치에 가장 가까운 경로 포인트 찾기
+            min_distance = float('inf')
+            for i, point in enumerate(path_points):
+                distance = ((point['x'] - current_x) ** 2 + 
+                           (point['y'] - current_y) ** 2) ** 0.5
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_index = i
+        else:
+            # CNC 데이터 없으면 시작점
+            if path_points:
+                current_x = path_points[0]['x']
+                current_y = path_points[0]['y']
+                current_z = path_points[0]['z']
+        
+        # 전체 경로 길이 계산
+        total_distance = 0.0
+        for i in range(len(path_points) - 1):
+            p1 = path_points[i]
+            p2 = path_points[i + 1]
+            total_distance += ((p2['x'] - p1['x']) ** 2 + (p2['y'] - p1['y']) ** 2) ** 0.5
+        
+        # 남은 거리 계산
+        remaining_distance = 0.0
+        for i in range(closest_index, len(path_points) - 1):
+            p1 = path_points[i]
+            p2 = path_points[i + 1]
+            remaining_distance += ((p2['x'] - p1['x']) ** 2 + (p2['y'] - p1['y']) ** 2) ** 0.5
+        
+        # 진행률 계산
+        progress = ((total_distance - remaining_distance) / total_distance * 100) if total_distance > 0 else 0
+        
+        return {
+            "success": True,
+            "has_nc_data": True,
+            "has_cnc_data": has_cnc_data,
+            "progress": round(progress, 2),
+            "current_index": closest_index,
+            "total_points": total_points,
+            "current_position": {
+                "x": round(current_x, 3),
+                "y": round(current_y, 3),
+                "z": round(current_z, 3)
+            },
+            "total_distance": round(total_distance, 2),
+            "remaining_distance": round(remaining_distance, 2),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 진행률 계산 실패: {e}")
+        return {
+            "success": False,
+            "has_nc_data": True,
+            "progress": 0,
+            "error": str(e)
+        }
 
 
 # 파일 읽기 요청 모델

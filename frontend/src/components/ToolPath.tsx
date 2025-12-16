@@ -1,12 +1,18 @@
 /**
  * ToolPath 시각화 컴포넌트 - 2D Canvas를 사용한 경로 표시
+ * NC코드 파일 업로드 → 백엔드에서 파싱 및 진행률 계산 → 프론트에서 시각화만
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
-import { useSensorData } from '../hooks/useSensorData';
 
 interface ToolPathProps {
   className?: string;
+}
+
+interface UploadStatus {
+  isUploading: boolean;
+  fileName: string | null;
+  error: string | null;
 }
 
 interface PathPoint {
@@ -34,110 +40,133 @@ interface NCPathData {
   total_points: number;
 }
 
+// 백엔드에서 받는 진행률 데이터
+interface ProgressData {
+  success: boolean;
+  has_nc_data: boolean;
+  has_cnc_data?: boolean;
+  progress: number;
+  current_index: number;
+  total_points: number;
+  current_position: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  total_distance: number;
+  remaining_distance: number;
+}
+
 const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [ncData, setNcData] = useState<NCPathData | null>(null);
+  const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [demoProgress, setDemoProgress] = useState(0);
-  const { latestData } = useSensorData();
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>({
+    isUploading: false,
+    fileName: null,
+    error: null
+  });
 
-  // NC코드 경로 데이터 로드
+  // NC코드 파일 업로드 핸들러
+  const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadStatus({ isUploading: true, fileName: file.name, error: null });
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      console.log('📤 NC코드 파일 업로드 시작:', file.name);
+      
+      const response = await axios.post('http://127.0.0.1:8000/api/nc/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      console.log('✅ NC코드 업로드 성공:', response.data);
+      
+      // 업로드 성공 후 경로 데이터 로드
+      const pathResponse = await axios.get('http://127.0.0.1:8000/api/nc/path');
+      setNcData(pathResponse.data);
+      
+      setUploadStatus({ 
+        isUploading: false, 
+        fileName: file.name, 
+        error: null 
+      });
+    } catch (error: any) {
+      console.error('❌ NC코드 업로드 실패:', error);
+      setUploadStatus({ 
+        isUploading: false, 
+        fileName: null, 
+        error: error.response?.data?.detail || '파일 업로드에 실패했습니다' 
+      });
+    }
+
+    // 파일 입력 초기화 (같은 파일 다시 선택 가능하도록)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  // NC코드 데이터 초기화 핸들러
+  const handleClearData = useCallback(async () => {
+    try {
+      await axios.delete('http://127.0.0.1:8000/api/nc/clear');
+      setNcData(null);
+      setProgressData(null);
+      setUploadStatus({ isUploading: false, fileName: null, error: null });
+      console.log('🗑️ NC코드 데이터 초기화됨');
+    } catch (error) {
+      console.error('NC코드 데이터 초기화 실패:', error);
+    }
+  }, []);
+
+  // 앱 시작 시 서버에 NC 데이터가 있는지 확인
   useEffect(() => {
-    const loadNCData = async () => {
-      setLoading(true);
+    const checkExistingData = async () => {
       try {
-        console.log('NC코드 데이터 로드 시도...');
         const response = await axios.get('http://127.0.0.1:8000/api/nc/path');
-        console.log('NC코드 데이터 로드 성공:', response.data);
+        console.log('기존 NC코드 데이터 발견:', response.data);
         setNcData(response.data);
       } catch (error: any) {
         if (error.response?.status === 404) {
-          console.log('NC코드 데이터 없음 (404) - 데모 데이터 생성');
-        } else {
-          console.error('NC코드 경로 데이터 로드 실패:', error);
+          console.log('NC코드 데이터 없음 - 파일 업로드 대기');
         }
-        // 오류 시에도 데모 데이터 생성
-        const demoData = generateDemoNCPath();
-        setNcData(demoData);
-      } finally {
-        setLoading(false);
       }
     };
 
-    loadNCData();
-    
-    // 2초마다 NC코드 데이터 다시 로드 (새로운 파일이 파싱되었을 때 감지)
-    const interval = setInterval(loadNCData, 2000);
-    
-    return () => clearInterval(interval);
+    checkExistingData();
   }, []);
 
-  // 데모 진행률 애니메이션 (실제 CNC 데이터가 없을 때)
+  // 백엔드에서 진행률 데이터 주기적 조회 (500ms 간격)
   useEffect(() => {
-    if (!latestData?.cnc_data?.curpos_x && ncData) {
-      const demoInterval = setInterval(() => {
-        setDemoProgress(prev => (prev + 0.5) % 100);
-      }, 100);
-      
-      return () => clearInterval(demoInterval);
-    }
-  }, [ncData, latestData]);
+    if (!ncData) return;
 
-  // 데모 NC코드 경로 생성 함수
-  const generateDemoNCPath = (): NCPathData => {
-    const pathPoints: PathPoint[] = [];
-    
-    // 사각형 경로 생성 (10x10mm)
-    const points = [
-      { x: 0, y: 0, z: 1 },
-      { x: 10, y: 0, z: 1 },
-      { x: 10, y: 10, z: 1 },
-      { x: 0, y: 10, z: 1 },
-      { x: 0, y: 0, z: 1 },
-      // 내부 원형 경로
-      { x: 2, y: 2, z: 1 },
-      { x: 8, y: 2, z: 1 },
-      { x: 8, y: 8, z: 1 },
-      { x: 2, y: 8, z: 1 },
-      { x: 2, y: 2, z: 1 },
-      // 추가 세부 경로
-      { x: 3, y: 3, z: 1 },
-      { x: 7, y: 3, z: 1 },
-      { x: 7, y: 7, z: 1 },
-      { x: 3, y: 7, z: 1 },
-      { x: 3, y: 3, z: 1 },
-      { x: 5, y: 5, z: 1 }
-    ];
-
-    points.forEach((point, index) => {
-      pathPoints.push({
-        line: index + 1,
-        x: point.x,
-        y: point.y,
-        z: point.z,
-        type: 'linear'
-      });
-    });
-
-    return {
-      success: true,
-      total_points: pathPoints.length,
-      path_points: pathPoints,
-      bounds: {
-        x_min: 0,
-        x_max: 10,
-        y_min: 0,
-        y_max: 10,
-        z_min: 1,
-        z_max: 1,
-        x_range: 10,
-        y_range: 10,
-        z_range: 0
+    const fetchProgress = async () => {
+      try {
+        const response = await axios.get('http://127.0.0.1:8000/api/nc/progress');
+        setProgressData(response.data);
+      } catch (error) {
+        console.error('진행률 조회 실패:', error);
       }
     };
-  };
 
-  // Canvas 렌더링
+    // 초기 로드
+    fetchProgress();
+
+    // 500ms 간격으로 진행률 업데이트
+    const interval = setInterval(fetchProgress, 500);
+
+    return () => clearInterval(interval);
+  }, [ncData]);
+
+  // Canvas 렌더링 (시각화만 담당, 계산은 백엔드에서)
   useEffect(() => {
     if (!canvasRef.current || !ncData) return;
 
@@ -145,13 +174,11 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Canvas 크기 고정 설정
-    const fixedWidth = 400;
-    const fixedHeight = 300;
-    canvas.width = fixedWidth;
-    canvas.height = fixedHeight;
-    canvas.style.width = `${fixedWidth}px`;
-    canvas.style.height = `${fixedHeight}px`;
+    // Canvas 크기 설정
+    const container = canvas.parentElement;
+    const size = container ? Math.min(container.clientWidth, container.clientHeight, 350) : 300;
+    canvas.width = size;
+    canvas.height = size;
 
     // 배경 초기화
     ctx.fillStyle = '#f9fafb';
@@ -160,106 +187,79 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     const { bounds, path_points } = ncData;
 
     // 좌표 변환 함수 (NC코드 좌표 → Canvas 좌표)
-    const padding = 20;
+    const padding = 25;
     const scaleX = (canvas.width - 2 * padding) / (bounds.x_range || 1);
     const scaleY = (canvas.height - 2 * padding) / (bounds.y_range || 1);
     const scale = Math.min(scaleX, scaleY);
 
-    const toCanvasX = (x: number) => {
-      return padding + (x - bounds.x_min) * scale;
-    };
+    const toCanvasX = (x: number) => padding + (x - bounds.x_min) * scale;
+    const toCanvasY = (y: number) => canvas.height - padding - (y - bounds.y_min) * scale;
 
-    const toCanvasY = (y: number) => {
-      // Y축 반전 (Canvas는 위에서 아래로 증가)
-      return canvas.height - padding - (y - bounds.y_min) * scale;
-    };
+    // 백엔드에서 받은 진행률 데이터 사용
+    const currentIndex = progressData?.current_index || 0;
+    const currentX = progressData?.current_position?.x || path_points[0]?.x || 0;
+    const currentY = progressData?.current_position?.y || path_points[0]?.y || 0;
+    const progress = progressData?.progress || 0;
+    const totalDistance = progressData?.total_distance || 0;
+    const remainingDistance = progressData?.remaining_distance || 0;
 
-    // 현재 CNC 위치 (실제 데이터가 없으면 데모 위치 사용)
-    let currentX: number, currentY: number;
-    
-    if (latestData?.cnc_data?.curpos_x !== undefined) {
-      // 실제 CNC 데이터 사용
-      currentX = latestData.cnc_data.curpos_x || 0;
-      currentY = latestData.cnc_data.curpos_y || 0;
-    } else {
-      // 데모 진행률에 따른 위치 계산
-      const progressIndex = Math.floor((demoProgress / 100) * (path_points.length - 1));
-      const currentPoint = path_points[progressIndex] || path_points[0];
-      currentX = currentPoint.x;
-      currentY = currentPoint.y;
-    }
-
-    // 현재 위치와 가장 가까운 경로 포인트 찾기
-    let closestIndex = 0;
-    let minDistance = Infinity;
-    let remainingDistance = 0;
-    
-    path_points.forEach((point, index) => {
-      const distance = Math.sqrt(
-        Math.pow(point.x - currentX, 2) + 
-        Math.pow(point.y - currentY, 2)
-      );
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestIndex = index;
-      }
-    });
-
-    // 남은 거리 계산 (현재 위치부터 끝까지의 경로 길이)
-    for (let i = closestIndex; i < path_points.length - 1; i++) {
-      const p1 = path_points[i];
-      const p2 = path_points[i + 1];
-      remainingDistance += Math.sqrt(
-        Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
-      );
-    }
-
-    // 전체 경로 길이 계산
-    let totalDistance = 0;
+    // 전체 경로 그리기 (G00: 빨강 점선, G01: 초록 실선)
     for (let i = 0; i < path_points.length - 1; i++) {
       const p1 = path_points[i];
       const p2 = path_points[i + 1];
-      totalDistance += Math.sqrt(
-        Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
-      );
-    }
-
-    // 진행률 계산
-    const progress = totalDistance > 0 ? ((totalDistance - remainingDistance) / totalDistance) * 100 : 0;
-
-    // 전체 경로 그리기 (회색)
-    ctx.strokeStyle = '#d1d5db';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    path_points.forEach((point, index) => {
-      const canvasX = toCanvasX(point.x);
-      const canvasY = toCanvasY(point.y);
+      const x1 = toCanvasX(p1.x);
+      const y1 = toCanvasY(p1.y);
+      const x2 = toCanvasX(p2.x);
+      const y2 = toCanvasY(p2.y);
       
-      if (index === 0) {
-        ctx.moveTo(canvasX, canvasY);
-      } else {
-        ctx.lineTo(canvasX, canvasY);
-      }
-    });
-    ctx.stroke();
-
-    // 완료된 경로 그리기 (초록색)
-    if (closestIndex > 0) {
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 2;
       ctx.beginPath();
-      for (let i = 0; i <= closestIndex; i++) {
-        const point = path_points[i];
-        const canvasX = toCanvasX(point.x);
-        const canvasY = toCanvasY(point.y);
-        
-        if (i === 0) {
-          ctx.moveTo(canvasX, canvasY);
-        } else {
-          ctx.lineTo(canvasX, canvasY);
-        }
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      
+      // G00 (rapid) = 빨간색 점선, G01 (linear) = 초록색 실선
+      if (p2.type === 'rapid') {
+        ctx.strokeStyle = '#fca5a5';  // 연한 빨강 (G00)
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+      } else {
+        ctx.strokeStyle = '#86efac';  // 연한 초록 (G01)
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1.5;
       }
+      
       ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // 완료된 경로 강조 (진한 색, 굵은 선)
+    if (currentIndex > 0) {
+      for (let i = 0; i < currentIndex; i++) {
+        const p1 = path_points[i];
+        const p2 = path_points[i + 1];
+        if (!p2) continue;
+        
+        const x1 = toCanvasX(p1.x);
+        const y1 = toCanvasY(p1.y);
+        const x2 = toCanvasX(p2.x);
+        const y2 = toCanvasY(p2.y);
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        
+        if (p2.type === 'rapid') {
+          ctx.strokeStyle = '#dc2626';  // 진한 빨강
+          ctx.setLineDash([4, 4]);
+          ctx.lineWidth = 2;
+        } else {
+          ctx.strokeStyle = '#16a34a';  // 진한 초록
+          ctx.setLineDash([]);
+          ctx.lineWidth = 2.5;
+        }
+        
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
     }
 
     // 시작점 표시 (파란색)
@@ -271,54 +271,51 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       ctx.fill();
     }
 
-    // 현재 위치 표시 (빨간색)
-    ctx.fillStyle = '#ef4444';
+    // 현재 위치 표시 (주황색)
+    ctx.fillStyle = '#f97316';
     ctx.beginPath();
     ctx.arc(toCanvasX(currentX), toCanvasY(currentY), 6, 0, 2 * Math.PI);
     ctx.fill();
-    
-    // 현재 위치에 테두리
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // 진행률 바 그리기
-    const progressBarWidth = 200;
-    const progressBarHeight = 20;
-    const progressBarX = canvas.width - progressBarWidth - 10;
-    const progressBarY = 10;
-    
-    // 진행률 바 배경
-    ctx.fillStyle = '#e5e7eb';
-    ctx.fillRect(progressBarX, progressBarY, progressBarWidth, progressBarHeight);
-    
-    // 진행률 바 채우기
-    ctx.fillStyle = '#3b82f6';
-    ctx.fillRect(progressBarX, progressBarY, (progressBarWidth * progress) / 100, progressBarHeight);
-    
-    // 진행률 바 테두리
-    ctx.strokeStyle = '#374151';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(progressBarX, progressBarY, progressBarWidth, progressBarHeight);
-    
-    // 진행률 텍스트
+    // 상태 정보 표시 (왼쪽 상단)
     ctx.fillStyle = '#1f2937';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${progress.toFixed(1)}%`, progressBarX + progressBarWidth / 2, progressBarY + 14);
-    
-    // 상세 정보 텍스트
+    ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'left';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText(`진행률: ${progress.toFixed(1)}%`, 10, 20);
-    ctx.fillText(`남은 거리: ${remainingDistance.toFixed(2)}mm`, 10, 35);
-    ctx.fillText(`전체 거리: ${totalDistance.toFixed(2)}mm`, 10, 50);
-    ctx.fillText(`포인트: ${closestIndex + 1} / ${path_points.length}`, 10, 65);
-    ctx.fillText(`현재 위치: (${currentX.toFixed(2)}, ${currentY.toFixed(2)})`, 10, 80);
+    
+    const hasCncData = progressData?.has_cnc_data;
+    const statusText = hasCncData ? '🟢 CNC 연결됨' : '⚪ CNC 대기';
+    ctx.fillText(statusText, 8, 15);
+    ctx.fillText(`진행률: ${progress.toFixed(1)}%`, 8, 30);
+    ctx.fillText(`위치: (${currentX.toFixed(1)}, ${currentY.toFixed(1)})`, 8, 45);
+    ctx.fillText(`남은거리: ${remainingDistance.toFixed(1)}mm`, 8, 60);
 
-  }, [ncData, latestData, demoProgress]);
+    // 진행률 바 (하단)
+    const barWidth = canvas.width - 20;
+    const barHeight = 8;
+    const barX = 10;
+    const barY = canvas.height - 15;
+    
+    ctx.fillStyle = '#e5e7eb';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+    
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(barX, barY, (barWidth * progress) / 100, barHeight);
+    
+    ctx.strokeStyle = '#9ca3af';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
 
-  if (loading) {
+  }, [ncData, progressData]);
+
+  // 파일 선택 버튼 클릭 핸들러
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  if (loading && !ncData) {
     return (
       <div className={`h-full bg-white shadow-lg rounded-2xl flex items-center justify-center ${className}`}>
         <div className="text-center">
@@ -329,42 +326,105 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     );
   }
 
+  // NC 파일 업로드 대기 화면
   if (!ncData) {
     return (
-      <div className={`h-full bg-white shadow-lg rounded-2xl flex items-center justify-center ${className}`}>
+      <div className={`h-full bg-white shadow-lg rounded-2xl flex items-center justify-center p-4 ${className}`}>
         <div className="text-center">
-          <div className="w-16 h-16 mx-auto mb-3 bg-gray-200 rounded-xl flex items-center justify-center">
-            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m-6 3l6-3" />
+          <div className="w-16 h-16 mx-auto mb-3 bg-blue-100 rounded-xl flex items-center justify-center">
+            <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-700 mb-1">ToolPath</h3>
-          <p className="text-sm text-gray-500">NC코드를 불러오는 중...</p>
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">ToolPath</h3>
+          <p className="text-sm text-gray-500 mb-4">NC코드 파일을 업로드하세요</p>
+          
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".nc,.txt,.tap,.cnc,.gcode"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <button
+            onClick={handleUploadClick}
+            disabled={uploadStatus.isUploading}
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+          >
+            {uploadStatus.isUploading ? '업로드 중...' : 'NC파일 선택'}
+          </button>
+          
+          <p className="text-xs text-gray-400 mt-2">.nc, .txt, .tap, .gcode</p>
+          
+          {uploadStatus.error && (
+            <p className="text-xs text-red-500 mt-2">{uploadStatus.error}</p>
+          )}
         </div>
       </div>
     );
   }
 
+  // NC 데이터 있을 때 - 시각화 화면
   return (
-    <div className={`bg-white shadow-lg rounded-2xl p-3 flex flex-col ${className}`} style={{ width: '400px', height: '350px' }}>
-      <div className="flex justify-between items-center mb-2">
-        <h3 className="text-sm font-semibold text-gray-800">ToolPath 진행상황</h3>
-        <div className="flex items-center space-x-2 text-xs text-gray-500">
-          <span>🔵 시작점</span>
-          <span>🟢 완료구간</span>
-          <span>🔴 현재위치</span>
-          <span>⚪ 남은구간</span>
+    <div className={`bg-white shadow-lg rounded-2xl p-3 flex flex-col h-full ${className}`}>
+      {/* 헤더 */}
+      <div className="flex justify-between items-center mb-1">
+        <div className="flex items-center space-x-2">
+          <h3 className="text-sm font-semibold text-gray-800">ToolPath</h3>
+          {uploadStatus.fileName && (
+            <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded-full truncate max-w-[80px]" title={uploadStatus.fileName}>
+              {uploadStatus.fileName}
+            </span>
+          )}
+        </div>
+        
+        <div className="flex items-center space-x-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".nc,.txt,.tap,.cnc,.gcode"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <button
+            onClick={handleUploadClick}
+            disabled={uploadStatus.isUploading}
+            className="p-1 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
+            title="NC파일 업로드"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </button>
+          <button
+            onClick={handleClearData}
+            className="p-1 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+            title="초기화"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
         </div>
       </div>
       
-      <canvas
-        ref={canvasRef}
-        className="border border-gray-200 rounded-lg"
-        style={{ width: '400px', height: '300px' }}
-      />
+      {/* 범례 */}
+      <div className="flex items-center justify-center space-x-3 text-xs text-gray-500 mb-1">
+        <span className="flex items-center"><span className="w-3 h-0.5 bg-red-400 mr-1"></span>G00</span>
+        <span className="flex items-center"><span className="w-3 h-0.5 bg-green-500 mr-1"></span>G01</span>
+        <span className="flex items-center"><span className="w-2 h-2 bg-blue-500 rounded-full mr-1"></span>시작</span>
+        <span className="flex items-center"><span className="w-2 h-2 bg-orange-500 rounded-full mr-1"></span>현재</span>
+      </div>
+      
+      {/* Canvas */}
+      <div className="flex-1 flex items-center justify-center">
+        <canvas
+          ref={canvasRef}
+          className="border border-gray-200 rounded-lg"
+        />
+      </div>
     </div>
   );
 };
 
 export default ToolPath;
-

@@ -157,7 +157,7 @@ class NCParser:
         except ValueError:
             return
         
-        # 이동 명령어 처리 (G0: 급속이동, G1: 절삭이동, G2/G3: 원호이동)
+        # 이동 명령어 처리 (G0/G00: 급속이동, G1/G01: 절삭이동, G2/G3: 원호이동)
         if g_code not in [0, 1, 2, 3]:
             return
         
@@ -174,24 +174,33 @@ class NCParser:
         if z is not None:
             self.current_position['Z'] = z
         
-        # 경로 포인트 저장 (G1: 절삭 이동, G2/G3: 원호 이동)
-        if g_code in [1, 2, 3]:
-            point = {
-                'line': line_num,
-                'x': self.current_position['X'],
-                'y': self.current_position['Y'],
-                'z': self.current_position['Z'],
-                'type': 'linear' if g_code == 1 else 'arc'
-            }
-            self.path_points.append(point)
+        # 경로 포인트 저장 (G00: 급속이동, G01: 절삭이동, G02/G03: 원호이동)
+        # 타입 구분: rapid (G00-빨강), linear (G01-초록), arc (G02/G03)
+        if g_code == 0:
+            move_type = 'rapid'  # G00 - 급속이동 (빨강)
+        elif g_code == 1:
+            move_type = 'linear'  # G01 - 절삭이동 (초록)
+        else:
+            move_type = 'arc'  # G02/G03 - 원호이동
+        
+        point = {
+            'line': line_num,
+            'x': self.current_position['X'],
+            'y': self.current_position['Y'],
+            'z': self.current_position['Z'],
+            'type': move_type,
+            'g_code': int(g_code)
+        }
+        self.path_points.append(point)
         
         # 명령어 저장
         self.commands.append({
             'line': line_num,
-            'code': f'G{g_code}',
+            'code': f'G{int(g_code):02d}',  # G00, G01 형식으로 저장
             'x': self.current_position['X'],
             'y': self.current_position['Y'],
-            'z': self.current_position['Z']
+            'z': self.current_position['Z'],
+            'type': move_type
         })
     
     def _extract_coordinate(self, line: str, axis: str) -> Optional[float]:

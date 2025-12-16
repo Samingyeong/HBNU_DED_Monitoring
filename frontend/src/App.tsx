@@ -6,7 +6,7 @@ import CameraView from './components/CameraView';
 import Charts from './components/Charts';
 import EmergencyModal from './components/EmergencyModal';
 import InitialSetupModal from './components/InitialSetupModal';
-// ToolPath 기능 제거
+import ToolPath from './components/ToolPath';
 
 function App() {
   const [emergency, setEmergency] = useState(false);
@@ -76,25 +76,28 @@ function App() {
           </div>
         </div>
     
-        {/* Right Panel - 2열 3행 레이아웃 */}
+        {/* Right Panel - 2열 레이아웃 */}
         <div className="flex-1 flex flex-col xl:flex-row gap-2">
-          {/* 1열 - 카메라 */}
-          <div className="w-full xl:w-1/3 flex flex-col gap-2">
-            {/* 1행 - Basler 카메라 */}
-            <div className="flex-1">
+          {/* 1열 - 카메라 + 툴패스 (세로 배치) */}
+          <div className="w-full xl:w-[380px] flex flex-col gap-2">
+            {/* 바슬러 카메라 (직사각형 - 이미지 중심) */}
+            <div className="h-[200px]">
               <CameraView cameraType="basler" />
             </div>
             
-            {/* 2행 - HikRobot 카메라 */}
-            <div className="flex-1">
+            {/* 하이크로봇 카메라 */}
+            <div className="h-[200px]">
               <CameraView cameraType="hikrobot" />
             </div>
             
-            {/* ToolPath 제거 */}
+            {/* 툴패스 (정사각형) */}
+            <div className="flex-1 min-h-[300px]">
+              <ToolPath className="h-full w-full" />
+            </div>
           </div>
 
           {/* 2열 - 차트들 */}
-          <div className="w-full xl:w-2/3 flex flex-col gap-2">
+          <div className="flex-1 flex flex-col gap-2">
             {/* 1행 - Melt Pool Area */}
             <div className="flex-1">
               <Charts chartType="meltpoolArea" />
