@@ -87,11 +87,15 @@ class DataStorage:
             "outpower": None,
             "setpower": None,
             "melt_pool_area": None,
+            # 가스 데이터 (GuiState.ini에서 읽음)
+            "powder_gas": None,
+            "coaxial_gas": None,
+            "shield_gas": None,
             "image_available": False,
             "hik_image_available": False
         }
         
-        # CNC 데이터 처리
+        # CNC 데이터 처리 (좌표 + 가스 데이터 포함)
         if sensor_data.get("cnc_data"):
             cnc_data = sensor_data["cnc_data"]
             normalized.update({
@@ -99,7 +103,11 @@ class DataStorage:
                 "curpos_y": cnc_data.get("curpos_y"),
                 "curpos_z": cnc_data.get("curpos_z"),
                 "curpos_a": cnc_data.get("curpos_a"),
-                "curpos_c": cnc_data.get("curpos_c")
+                "curpos_c": cnc_data.get("curpos_c"),
+                # 가스 데이터 (GuiState.ini에서 병합됨)
+                "powder_gas": cnc_data.get("powder_gas"),
+                "coaxial_gas": cnc_data.get("coaxial_gas"),
+                "shield_gas": cnc_data.get("shield_gas")
             })
         
         # 레이저 데이터 처리
@@ -119,19 +127,21 @@ class DataStorage:
                 "2ct": pyro_data.get("2ct")
             })
         
-        # 카메라 데이터 처리
+        # 카메라 데이터 처리 (sensor_manager에서 이미 변환된 데이터)
         if sensor_data.get("camera_data"):
             camera_data = sensor_data["camera_data"]
             normalized.update({
                 "melt_pool_area": camera_data.get("melt_pool_area"),
-                "image_available": camera_data.get("image") is not None
+                # sensor_manager에서 이미 image_available 필드로 변환됨
+                "image_available": camera_data.get("image_available", False)
             })
         
-        # HikRobot 카메라 데이터 처리
+        # HikRobot 카메라 데이터 처리 (sensor_manager에서 변환된 데이터)
         if sensor_data.get("hik_camera_data"):
             hik_data = sensor_data["hik_camera_data"]
+            # sensor_manager에서 이미 hik_image_available 필드가 있으면 사용, 없으면 combined_image 체크
             normalized.update({
-                "hik_image_available": hik_data.get("combined_image") is not None
+                "hik_image_available": hik_data.get("hik_image_available", hik_data.get("combined_image") is not None)
             })
         
         return normalized
@@ -176,7 +186,11 @@ class DataStorage:
                 "mpt": data["mpt"],
                 "melt_pool_area": data["melt_pool_area"],
                 "outpower": data["outpower"],
-                "setpower": data["setpower"]
+                "setpower": data["setpower"],
+                # 가스 데이터 추가
+                "powder_gas": data["powder_gas"],
+                "coaxial_gas": data["coaxial_gas"],
+                "shield_gas": data["shield_gas"]
             }
             
             # CSV 파일에 추가

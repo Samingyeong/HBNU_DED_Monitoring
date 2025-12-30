@@ -15,19 +15,13 @@ interface CNCData {
   feed_rate?: number;
   feed_override?: number;
   rapid_override?: number;
-  // Feed Rate 데이터 (샘플)
+  // Feed Rate 데이터 (GuiState.ini에서 읽음)
   feeder1_rpm?: number;
-  feeder1_remaining?: number;
-  feeder1_status?: boolean;
   feeder2_rpm?: number;
-  feeder2_remaining?: number;
-  feeder2_status?: boolean;
   feeder3_rpm?: number;
-  feeder3_remaining?: number;
-  feeder3_status?: boolean;
-  // Gas 데이터 (샘플)
+  // Gas 데이터 (GuiState.ini에서 읽음)
+  powder_gas?: number;
   coaxial_gas?: number;
-  feeding_gas?: number;
   shield_gas?: number;
 }
 
@@ -39,12 +33,10 @@ export default function CNCStatus() {
     curpos_x: 0, curpos_y: 0, curpos_z: 0, curpos_a: 0, curpos_c: 0,
     macpos_x: 0, macpos_y: 0, macpos_z: 0, macpos_a: 0, macpos_c: 0,
     feed_rate: 0, feed_override: 0, rapid_override: 0,
-    // Feed Rate 데이터 (샘플)
-    feeder1_rpm: 0, feeder1_remaining: 0, feeder1_status: false,
-    feeder2_rpm: 0, feeder2_remaining: 0, feeder2_status: false,
-    feeder3_rpm: 0, feeder3_remaining: 0, feeder3_status: false,
-    // Gas 데이터 (샘플)
-    coaxial_gas: 0, feeding_gas: 0, shield_gas: 0,
+    // Feed Rate 데이터 (GuiState.ini에서 읽음)
+    feeder1_rpm: 0, feeder2_rpm: 0, feeder3_rpm: 0,
+    // Gas 데이터 (GuiState.ini에서 읽음)
+    powder_gas: 0, coaxial_gas: 0, shield_gas: 0,
   };
 
   const formatValue = (value: number | undefined, decimals: number = 2): string => {
@@ -89,28 +81,16 @@ export default function CNCStatus() {
         
         {/* Feed Rate 카드 */}
         <div className="bg-gray-50 p-1.5 rounded-lg">
-          <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">Feed Rate</h4>
-          <div className="space-y-0.5">
-            {/* 헤더 */}
-            <div className="flex justify-center text-xs">
-              <div className="w-20"></div>
-              <div className="w-16 text-center text-gray-600 font-medium">[RPM]</div>
-              <div className="w-16 text-center text-gray-600 font-medium">[잔량]</div>
-            </div>
-            
-            {/* 피더 데이터 */}
+          <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">Feeder RPM</h4>
+          <div className="grid grid-cols-3 gap-2">
             {[
-              { name: 'Feeder1', rpm: cncData.feeder1_rpm, remaining: cncData.feeder1_remaining, status: cncData.feeder1_status },
-              { name: 'Feeder2', rpm: cncData.feeder2_rpm, remaining: cncData.feeder2_remaining, status: cncData.feeder2_status },
-              { name: 'Feeder3', rpm: cncData.feeder3_rpm, remaining: cncData.feeder3_remaining, status: cncData.feeder3_status }
+              { name: 'Feeder1', rpm: cncData.feeder1_rpm },
+              { name: 'Feeder2', rpm: cncData.feeder2_rpm },
+              { name: 'Feeder3', rpm: cncData.feeder3_rpm }
             ].map((feeder) => (
-              <div key={feeder.name} className="flex justify-center items-center text-xs">
-                <div className="flex items-center gap-2 w-20">
-                  <div className={`w-3 h-3 rounded-full ${feeder.status ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                  <span className="font-medium text-gray-900">{feeder.name}</span>
-                </div>
-                <div className="w-16 text-center font-mono text-gray-900">{feeder.rpm}</div>
-                <div className="w-16 text-center font-mono text-gray-900">{feeder.remaining}%</div>
+              <div key={feeder.name} className="text-center">
+                <div className="text-xs font-medium text-gray-900 mb-0.5">{feeder.name}</div>
+                <div className="text-sm font-mono text-gray-900">{feeder.rpm || 0}</div>
               </div>
             ))}
           </div>
@@ -121,8 +101,8 @@ export default function CNCStatus() {
           <h4 className="text-xs font-bold text-gray-900 mb-0.5 pb-0.5 border-b border-gray-300">Gas (L/min)</h4>
           <div className="grid grid-cols-3 gap-2">
             {[
+              { name: 'Powder', value: cncData.powder_gas },
               { name: 'Coaxial', value: cncData.coaxial_gas },
-              { name: 'Feeding', value: cncData.feeding_gas },
               { name: 'Shield', value: cncData.shield_gas }
             ].map((gas) => (
               <div key={gas.name} className="text-center">

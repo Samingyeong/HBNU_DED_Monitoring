@@ -46,9 +46,11 @@ const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplet
             <input
               type="text"
               value={operatorName}
-              onChange={(e) => {
-                console.log('작업자명 입력:', e.target.value);
-                setOperatorName(e.target.value);
+              onChange={(e) => setOperatorName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSubmit();
+                }
               }}
               placeholder="작업자명을 입력하세요"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

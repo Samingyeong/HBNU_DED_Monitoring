@@ -121,14 +121,23 @@ class CameraCollector(threading.Thread):
             print("[Basler] 이미지 저장 중지")
 
     def run(self):
+        frame_count = 0
+        error_count = 0
         while self.running:
             loop_start = time.perf_counter()
             frame = self.camera.get_data()
+            
             if frame is not None:
                 area = self.camera.calculate_melt_pool_area(frame, threshold=120)
                 data = {"image": frame, "melt_pool_area": area}
                 self.db.store_data(data)
-
+                frame_count += 1
+                error_count = 0  # 성공하면 에러 카운트 리셋
+                
+                # 100프레임마다 디버그 로그 출력
+                if frame_count % 100 == 0:
+                    print(f"[Basler DEBUG] 프레임 수집 중: {frame_count}개, 멜팅풀 면적: {area:.3f} mm²")
+                
                 # 이미지 저장 (save_dir이 설정되어 있을 때만, 1초 간격)
                 with self._lock:
                     current_save_dir = self.save_dir
@@ -141,6 +150,11 @@ class CameraCollector(threading.Thread):
                         cv2.imwrite(filename, frame)
                         print(f"[Basler SAVE] {filename}")
                         self.last_save = now
+            else:
+                error_count += 1
+                # 100번 연속 실패시 경고 출력
+                if error_count % 100 == 0:
+                    print(f"[Basler WARNING] 프레임 없음! 연속 {error_count}회 실패, 총 수집: {frame_count}개")
 
             sleep_time = max(0, (1/self.sample_rate) - (time.perf_counter() - loop_start))
             time.sleep(sleep_time)

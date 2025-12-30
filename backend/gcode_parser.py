@@ -183,6 +183,7 @@ class NCParser:
         else:
             move_type = 'arc'  # G02/G03 - 원호이동
         
+        # 모든 이동 명령에 대해 경로 포인트 추가 (G00, G01, G02, G03)
         point = {
             'line': line_num,
             'x': self.current_position['X'],

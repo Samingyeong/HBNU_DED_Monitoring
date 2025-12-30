@@ -92,7 +92,23 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       
       // 업로드 성공 후 경로 데이터 로드
       const pathResponse = await axios.get('http://127.0.0.1:8000/api/nc/path');
-      setNcData(pathResponse.data);
+      console.log('📊 NC경로 데이터 수신:', pathResponse.data);
+      
+      // 데이터 유효성 검증
+      if (pathResponse.data?.path_points && pathResponse.data.path_points.length > 0) {
+        console.log(`✅ 경로 포인트 ${pathResponse.data.path_points.length}개 로드됨`);
+        console.log('📍 첫 번째 포인트:', pathResponse.data.path_points[0]);
+        console.log('📍 마지막 포인트:', pathResponse.data.path_points[pathResponse.data.path_points.length - 1]);
+        setNcData(pathResponse.data);
+      } else {
+        console.error('❌ 경로 포인트가 비어있음!', pathResponse.data);
+        setUploadStatus({ 
+          isUploading: false, 
+          fileName: null, 
+          error: 'NC 파일에서 경로를 추출할 수 없습니다' 
+        });
+        return;
+      }
       
       setUploadStatus({ 
         isUploading: false, 
@@ -132,12 +148,22 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     const checkExistingData = async () => {
       try {
         const response = await axios.get('http://127.0.0.1:8000/api/nc/path');
-        console.log('기존 NC코드 데이터 발견:', response.data);
-        setNcData(response.data);
-      } catch (error: any) {
-        if (error.response?.status === 404) {
-          console.log('NC코드 데이터 없음 - 파일 업로드 대기');
+        console.log('[ToolPath] 초기 NC 데이터 확인:', response.data);
+        
+        // has_data 필드 확인 (데이터가 없으면 null로 설정)
+        if (response.data?.has_data === false) {
+          console.log('[ToolPath] NC코드 데이터 없음 - 파일 업로드 대기');
+          setNcData(null);
+        } else if (response.data?.path_points && response.data.path_points.length > 0) {
+          console.log(`[ToolPath] ✅ 기존 NC 데이터 발견: ${response.data.path_points.length}개 포인트`);
+          setNcData(response.data);
+        } else {
+          console.log('[ToolPath] NC 데이터 있지만 경로 포인트 없음');
+          setNcData(null);
         }
+      } catch (error: any) {
+        console.log('[ToolPath] NC코드 데이터 조회 실패:', error.message);
+        setNcData(null);
       }
     };
 
@@ -168,23 +194,44 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
 
   // Canvas 렌더링 (시각화만 담당, 계산은 백엔드에서)
   useEffect(() => {
-    if (!canvasRef.current || !ncData) return;
+    console.log('[ToolPath Canvas] 렌더링 시작, ncData:', ncData ? `${ncData.path_points?.length || 0}개 포인트` : 'null');
+    
+    if (!canvasRef.current || !ncData) {
+      console.log('[ToolPath Canvas] 렌더링 스킵 - canvasRef:', !!canvasRef.current, 'ncData:', !!ncData);
+      return;
+    }
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.error('[ToolPath Canvas] 2D 컨텍스트 생성 실패');
+      return;
+    }
 
     // Canvas 크기 설정
     const container = canvas.parentElement;
     const size = container ? Math.min(container.clientWidth, container.clientHeight, 350) : 300;
     canvas.width = size;
     canvas.height = size;
+    console.log('[ToolPath Canvas] 캔버스 크기:', size, 'x', size);
 
     // 배경 초기화
     ctx.fillStyle = '#f9fafb';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const { bounds, path_points } = ncData;
+    
+    if (!path_points || path_points.length === 0) {
+      console.warn('[ToolPath Canvas] 경로 포인트가 비어있음!');
+      ctx.fillStyle = '#666';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('경로 데이터 없음', canvas.width / 2, canvas.height / 2);
+      return;
+    }
+    
+    console.log('[ToolPath Canvas] 경로 그리기 시작:', path_points.length, '개 포인트');
+    console.log('[ToolPath Canvas] bounds:', bounds);
 
     // 좌표 변환 함수 (NC코드 좌표 → Canvas 좌표)
     const padding = 25;
@@ -212,7 +259,7 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       const x2 = toCanvasX(p2.x);
       const y2 = toCanvasY(p2.y);
       
-      ctx.beginPath();
+    ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       
@@ -227,39 +274,42 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
         ctx.lineWidth = 1.5;
       }
       
-      ctx.stroke();
+    ctx.stroke();
     }
     ctx.setLineDash([]);
 
-    // 완료된 경로 강조 (진한 색, 굵은 선)
-    if (currentIndex > 0) {
-      for (let i = 0; i < currentIndex; i++) {
-        const p1 = path_points[i];
-        const p2 = path_points[i + 1];
-        if (!p2) continue;
-        
-        const x1 = toCanvasX(p1.x);
-        const y1 = toCanvasY(p1.y);
-        const x2 = toCanvasX(p2.x);
-        const y2 = toCanvasY(p2.y);
-        
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        
-        if (p2.type === 'rapid') {
-          ctx.strokeStyle = '#dc2626';  // 진한 빨강
-          ctx.setLineDash([4, 4]);
-          ctx.lineWidth = 2;
-        } else {
-          ctx.strokeStyle = '#16a34a';  // 진한 초록
-          ctx.setLineDash([]);
-          ctx.lineWidth = 2.5;
-        }
-        
-        ctx.stroke();
-      }
+    // 완료된 경로 강조 (주황색 선으로 진행된 경로 표시)
+    // CNC 데이터가 있거나 currentIndex > 0일 때 진행 경로 그리기
+    const hasCncConnection = progressData?.has_cnc_data;
+    
+    if (currentIndex > 0 || hasCncConnection) {
+      // 주황색 선으로 완료된 경로 그리기
+      ctx.beginPath();
+      ctx.strokeStyle = '#f97316';  // 주황색 (현재 위치 점과 동일)
       ctx.setLineDash([]);
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // 시작점으로 이동
+      const startPoint = path_points[0];
+      ctx.moveTo(toCanvasX(startPoint.x), toCanvasY(startPoint.y));
+      
+      // 현재 인덱스까지 선 그리기 (경로 포인트를 따라)
+      for (let i = 1; i <= currentIndex && i < path_points.length; i++) {
+        const point = path_points[i];
+        ctx.lineTo(toCanvasX(point.x), toCanvasY(point.y));
+      }
+      
+      // 현재 CNC 위치까지 연결 (실제 좌표로 마무리)
+      ctx.lineTo(toCanvasX(currentX), toCanvasY(currentY));
+      
+      ctx.stroke();
+      
+      // 디버그: 콘솔에 진행 상태 출력 (개발 중에만)
+      if (currentIndex % 10 === 0) {
+        console.log(`[ToolPath] 진행: ${currentIndex}/${path_points.length}, 위치: (${currentX.toFixed(1)}, ${currentY.toFixed(1)})`);
+      }
     }
 
     // 시작점 표시 (파란색)
@@ -309,7 +359,7 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     ctx.strokeRect(barX, barY, barWidth, barHeight);
 
   }, [ncData, progressData]);
-
+    
   // 파일 선택 버튼 클릭 핸들러
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -418,10 +468,10 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       
       {/* Canvas */}
       <div className="flex-1 flex items-center justify-center">
-        <canvas
-          ref={canvasRef}
-          className="border border-gray-200 rounded-lg"
-        />
+      <canvas
+        ref={canvasRef}
+        className="border border-gray-200 rounded-lg"
+      />
       </div>
     </div>
   );

@@ -3,257 +3,207 @@ import axios from 'axios';
 
 const API_BASE_URL = 'http://127.0.0.1:8000';
 
-// 개발 환경에서 Electron API mock - 백엔드 API를 통해 파일 읽기
-if (process.env.NODE_ENV === 'development' && !window.electronAPI) {
-  window.electronAPI = {
-    readLogFile: async (filePath: string) => {
-      try {
-        // 개발 환경에서는 백엔드 API를 통해 파일 읽기
-        const response = await axios.post(`${API_BASE_URL}/api/file/read`, {
-          file_path: filePath
-        }, { timeout: 3000 });
-        
-        if (response.data?.success) {
-          return { success: true, content: response.data.content };
-        } else {
-          return { success: false, error: response.data?.error || 'File not found' };
-        }
-      } catch (error: any) {
-        // 백엔드 연결 실패 시 조용히 실패 (개발 환경에서는 정상)
-        console.debug('📁 파일 읽기 스킵 (백엔드 미연결):', filePath);
-        return { success: false, error: 'Backend not available' };
-      }
-    },
-    checkFileExists: async (filePath: string) => {
-      try {
-        const response = await axios.post(`${API_BASE_URL}/api/file/exists`, {
-          file_path: filePath
-        }, { timeout: 3000 });
-        return response.data?.exists || false;
-      } catch {
-        return false;
-      }
-    }
-  };
-}
-
 interface AutoSaveStatus {
   isAutoSaving: boolean;
   currentSession: string | null;
-  lastTraceTime: string | null;
+  lastEventTime: string | null;
   hasException: boolean;
   error: string | null;
 }
 
-interface TraceLogEntry {
-  timestamp: string;
-  message: string;
+interface TempStorageInfo {
+  has_temp_data: boolean;
+  session_id: string | null;
+  data_count: number;
+  start_time: string | null;
 }
 
 export const useAutoSave = () => {
   const [status, setStatus] = useState<AutoSaveStatus>({
     isAutoSaving: false,
     currentSession: null,
-    lastTraceTime: null,
+    lastEventTime: null,
     hasException: false,
     error: null
   });
 
-  // 파일 경로 설정 (C드라이브 기본, D드라이브 폴백)
-  const getLogPaths = useCallback(() => {
-    const basePaths = [
-      'C:\\DED\\Log',
-      'D:\\DED\\Log'
-    ];
-    
-    return basePaths.map(base => ({
-      trace: `${base}\\Trace\\Trace_${new Date().toISOString().slice(0, 10).replace(/-/g, '-')}.txt`,
-      exception: `${base}\\Exception\\Exception_${new Date().toISOString().slice(0, 10).replace(/-/g, '-')}.txt`
-    }));
+  const [tempStorage, setTempStorage] = useState<TempStorageInfo>({
+    has_temp_data: false,
+    session_id: null,
+    data_count: 0,
+    start_time: null
+  });
+
+  // 백엔드에서 자동저장 상태 조회 (폴링)
+  const fetchAutoSaveStatus = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/autosave/status`, {
+        timeout: 3000
+      });
+      
+      if (response.data?.success) {
+        setStatus(prev => ({
+          ...prev,
+          isAutoSaving: response.data.is_auto_saving || false,
+          currentSession: response.data.current_session || null,
+          lastEventTime: response.data.timestamp,
+          error: null
+        }));
+        
+        if (response.data.temp_storage) {
+          setTempStorage(response.data.temp_storage);
+        }
+      }
+    } catch (error) {
+      // 백엔드 연결 실패 시 조용히 실패
+      console.debug('📋 자동저장 상태 조회 스킵 (백엔드 미연결)');
+    }
   }, []);
 
-  // Trace 파일에서 시작/종료 로그 감지
-  const checkTraceFile = useCallback(async () => {
-    try {
-      const logPaths = getLogPaths();
+  // WebSocket 메시지 처리 (자동저장 이벤트)
+  const handleWebSocketMessage = useCallback((data: any) => {
+    if (data.type === 'auto_save_event') {
+      console.log('📋 자동저장 이벤트 수신:', data);
       
-      for (const paths of logPaths) {
-        try {
-          // Electron IPC를 통해 파일 읽기
-          const result = await window.electronAPI?.readLogFile(paths.trace);
-          
-          if (result?.success && result.content) {
-            const lines = result.content.split('\n').filter(line => line.trim());
-            
-            if (lines.length === 0) continue;
-            
-            const lastLine = lines[lines.length - 1];
-            const [timestamp, ...messageParts] = lastLine.split(',');
-            const message = messageParts.join(',').trim();
-            
-            // 시작 로그 감지 (NC_CS5Axis,StartNormal)
-            if (message.includes('NC_CS5Axis,StartNormal') && message.includes('step,10')) {
-              const sessionId = `session_${timestamp.replace(/[:.]/g, '-')}`;
-              
-              setStatus(prev => ({
-                ...prev,
-                isAutoSaving: true,
-                currentSession: sessionId,
-                lastTraceTime: timestamp,
-                hasException: false,
-                error: null
-              }));
-              
-              console.log('🚀 자동저장 시작:', sessionId);
-              // 백엔드에 자동저장 시작 요청
-              startAutoSaving(sessionId);
-              return;
-            }
-            
-            // 종료 로그 감지 (NC_CS5AXIS,IsRunning,False)
-            if (message.includes('NC_CS5AXIS,IsRunning,False')) {
-              setStatus(prev => ({
-                ...prev,
-                isAutoSaving: false,
-                currentSession: null,
-                lastTraceTime: timestamp,
-                hasException: false
-              }));
-              
-              console.log('🛑 자동저장 중지: NC 작업 완료');
-              // 백엔드에 자동저장 중지 요청
-              stopAutoSaving();
-              return;
-            }
-            
-            // UnInit 로그 감지 (시스템 종료)
-            if (message.includes('UnInit Completed')) {
-              setStatus(prev => ({
-                ...prev,
-                isAutoSaving: false,
-                currentSession: null,
-                lastTraceTime: timestamp,
-                hasException: false
-              }));
-              
-              console.log('🛑 자동저장 중지: 시스템 종료');
-              // 백엔드에 자동저장 중지 요청
-              stopAutoSaving();
-              return;
-            }
-          }
-        } catch (error) {
-          // 파일이 없거나 읽을 수 없는 경우 다음 경로 시도
-          continue;
-        }
+      if (data.event === 'start') {
+        setStatus(prev => ({
+          ...prev,
+          isAutoSaving: true,
+          currentSession: data.session_id,
+          lastEventTime: data.timestamp,
+          hasException: false,
+          error: null
+        }));
+        console.log('🚀 자동저장 시작 (백엔드에서 감지):', data.session_id);
+      } else if (data.event === 'stop') {
+        setStatus(prev => ({
+          ...prev,
+          isAutoSaving: false,
+          currentSession: null,
+          lastEventTime: data.timestamp,
+          hasException: false
+        }));
+        console.log('🛑 자동저장 중지 (백엔드에서 감지):', data.reason);
       }
-    } catch (error) {
-      console.error('Trace 파일 확인 중 오류:', error);
-      setStatus(prev => ({
-        ...prev,
-        error: `Trace 파일 읽기 실패: ${error}`
-      }));
     }
-  }, [getLogPaths]);
+  }, []);
 
-  // Exception 파일에서 중단 감지
-  const checkExceptionFile = useCallback(async () => {
-    try {
-      const logPaths = getLogPaths();
-      
-      for (const paths of logPaths) {
-        try {
-          // Electron IPC를 통해 파일 읽기
-          const result = await window.electronAPI?.readLogFile(paths.exception);
-          
-          if (result?.success && result.content) {
-            const lines = result.content.split('\n').filter(line => line.trim());
-            
-            if (lines.length > 0) {
-              const lastLine = lines[lines.length - 1];
-              const [timestamp, ...messageParts] = lastLine.split(',');
-              const message = messageParts.join(',').trim();
-              
-              // Exception 발생 시 자동저장 중지
-              if (message.includes('SocketServer') || message.includes('Exception')) {
-                setStatus(prev => ({
-                  ...prev,
-                  isAutoSaving: false,
-                  currentSession: null,
-                  hasException: true,
-                  error: `Exception 발생: ${message}`
-                }));
-                
-                console.log('⚠️ 자동저장 중지: Exception 발생');
-                // 백엔드에 자동저장 중지 요청
-                stopAutoSaving();
-                return;
-              }
-            }
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-    } catch (error) {
-      console.error('Exception 파일 확인 중 오류:', error);
-    }
-  }, [getLogPaths]);
-
-  // 파일 모니터링 시작 (Electron 환경에서만)
+  // 폴링으로 상태 확인 (5초마다)
   useEffect(() => {
-    // Electron API가 없으면 파일 모니터링 비활성화
-    if (!window.electronAPI) {
-      console.log('⚠️ Electron 환경이 아니므로 자동저장 파일 모니터링 비활성화');
-      return;
-    }
-
+    // 초기 상태 조회
+    fetchAutoSaveStatus();
+    
     const interval = setInterval(() => {
-      checkTraceFile();
-      checkExceptionFile();
-    }, 2000); // 2초마다 체크
+      fetchAutoSaveStatus();
+    }, 5000); // 5초마다 체크 (백엔드에서 2초마다 파일 감시하므로 충분)
 
     return () => clearInterval(interval);
-  }, [checkTraceFile, checkExceptionFile]);
+  }, [fetchAutoSaveStatus]);
 
-  // 자동저장 시작 시 백엔드에 임시 저장 요청
-  const startAutoSaving = useCallback(async (sessionId: string) => {
-    try {
-      await axios.post('http://127.0.0.1:8000/api/save/start', {
-        folder_name: sessionId,
-        auto_save: true
-      });
-      console.log('✅ 자동저장 임시 저장 시작됨:', sessionId);
-    } catch (error) {
-      console.error('❌ 자동저장 백엔드 통신 오류:', error);
-    }
-  }, []);
+  // WebSocket 연결 및 메시지 수신
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
 
-  // 자동저장 중지 시 백엔드에 임시 저장 중지 요청
-  const stopAutoSaving = useCallback(async () => {
-    try {
-      await axios.post('http://127.0.0.1:8000/api/save/temp-stop');
-      console.log('✅ 자동저장 임시 저장 중지됨');
-    } catch (error) {
-      console.error('❌ 자동저장 백엔드 통신 오류:', error);
-    }
-  }, []);
+    const connect = () => {
+      try {
+        ws = new WebSocket('ws://127.0.0.1:8000/ws');
+        
+        ws.onopen = () => {
+          console.log('📋 자동저장 WebSocket 연결됨');
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (e) {
+            // JSON 파싱 실패 무시
+          }
+        };
+        
+        ws.onclose = () => {
+          console.log('📋 자동저장 WebSocket 연결 해제');
+          // 3초 후 재연결 시도
+          reconnectTimeout = setTimeout(connect, 3000);
+        };
+        
+        ws.onerror = () => {
+          // 에러 시 조용히 처리 (onclose에서 재연결)
+        };
+      } catch (e) {
+        // 연결 실패 시 3초 후 재시도
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [handleWebSocketMessage]);
 
   // 수동으로 자동저장 상태 리셋
   const resetAutoSave = useCallback(() => {
     setStatus({
       isAutoSaving: false,
       currentSession: null,
-      lastTraceTime: null,
+      lastEventTime: null,
       hasException: false,
       error: null
     });
   }, []);
 
+  // 수동으로 자동저장 시작 (백엔드 API 호출)
+  const startAutoSaving = useCallback(async (sessionId: string) => {
+    try {
+      await axios.post(`${API_BASE_URL}/api/save/start`, {
+        folder_name: sessionId,
+        auto_save: true
+      });
+      console.log('✅ 자동저장 수동 시작:', sessionId);
+      
+      setStatus(prev => ({
+        ...prev,
+        isAutoSaving: true,
+        currentSession: sessionId,
+        lastEventTime: new Date().toISOString(),
+        error: null
+      }));
+    } catch (error) {
+      console.error('❌ 자동저장 수동 시작 실패:', error);
+    }
+  }, []);
+
+  // 수동으로 자동저장 중지 (백엔드 API 호출)
+  const stopAutoSaving = useCallback(async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/api/save/temp-stop`);
+      console.log('✅ 자동저장 수동 중지');
+      
+      setStatus(prev => ({
+        ...prev,
+        isAutoSaving: false,
+        currentSession: null,
+        lastEventTime: new Date().toISOString()
+      }));
+    } catch (error) {
+      console.error('❌ 자동저장 수동 중지 실패:', error);
+    }
+  }, []);
+
   return {
     ...status,
+    tempStorage,
     resetAutoSave,
     startAutoSaving,
-    stopAutoSaving
+    stopAutoSaving,
+    refreshStatus: fetchAutoSaveStatus
   };
 };

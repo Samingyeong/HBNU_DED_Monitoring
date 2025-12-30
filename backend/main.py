@@ -32,6 +32,9 @@ from state.machine_state import MachineState, MachineStateManager, determine_sta
 from events.event_detector import EventDetector, EventType, Event
 from notifier.slack import SlackNotifier, get_slack_notifier
 
+# DED Trace 파일 감시 모듈
+from ded_trace_watcher import DEDTraceWatcher, TraceEvent, get_trace_watcher
+
 import uvicorn
 
 # 로깅 설정
@@ -91,6 +94,9 @@ nc_path_data: Optional[Dict] = None  # 현재 파싱된 NC코드 경로 데이�
 machine_state_manager: Optional[MachineStateManager] = None
 event_detector: Optional[EventDetector] = None
 slack_notifier: Optional[SlackNotifier] = None
+
+# DED Trace 파일 감시자 (전역 인스턴스)
+trace_watcher: Optional[DEDTraceWatcher] = None
 
 
 @asynccontextmanager
@@ -181,6 +187,94 @@ async def lifespan(app: FastAPI):
     machine_state_manager.on_transition(on_state_transition)
     logger.info("✅ 상태 머신 & Slack 알림 시스템 초기화 완료")
     
+    # ============================================
+    # DED Trace 파일 감시자 초기화 (백엔드에서 파일 감시)
+    # ============================================
+    global trace_watcher
+    trace_watcher = DEDTraceWatcher(check_interval=2.0)
+    
+    async def on_trace_event(event: TraceEvent):
+        """Trace 이벤트 발생 시 처리"""
+        logger.info(f"📋 Trace 이벤트: {event.event_type} - {event.message[:50]}...")
+        
+        if event.event_type == 'process_start':
+            # 자동저장 시작
+            session_id = event.metadata.get('session_id', f'auto_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            try:
+                await data_storage.start_temp_storage(session_id)
+                logger.info(f"🚀 자동저장 시작: {session_id}")
+                
+                # 상태 전이: IDLE → RUNNING
+                if machine_state_manager:
+                    machine_state_manager.transition_to(
+                        MachineState.STARTING,
+                        reason="Trace 파일에서 공정 시작 감지",
+                        metadata={"session_id": session_id}
+                    )
+                    machine_state_manager.transition_to(
+                        MachineState.RUNNING,
+                        reason="공정 시작됨",
+                        metadata={"session_id": session_id}
+                    )
+                
+                # WebSocket으로 프론트엔드에 알림
+                if websocket_manager:
+                    await websocket_manager.broadcast_data({
+                        "type": "auto_save_event",
+                        "event": "start",
+                        "session_id": session_id,
+                        "timestamp": datetime.now().isoformat()
+                    })
+            except Exception as e:
+                logger.error(f"❌ 자동저장 시작 실패: {e}")
+        
+        elif event.event_type in ['process_end', 'system_shutdown']:
+            # 자동저장 종료 및 DB에 자동 저장
+            try:
+                save_path = None
+                session_id = data_storage.temp_storage_session_id
+                data_count = len(data_storage.temp_storage)
+                
+                # 임시 저장 데이터가 있으면 DB에 자동 저장
+                if session_id and data_count > 0:
+                    save_path = await data_storage.save_temp_storage_to_permanent(session_id)
+                    logger.info(f"💾 자동저장 데이터 DB에 저장됨: {save_path} ({data_count}개 데이터)")
+                else:
+                    await data_storage.stop_temp_storage()
+                    logger.info(f"🛑 자동저장 중지 (저장할 데이터 없음): {event.event_type}")
+                
+                # 상태 전이: RUNNING → STOPPED → IDLE
+                if machine_state_manager:
+                    machine_state_manager.transition_to(
+                        MachineState.STOPPING,
+                        reason=f"Trace 파일에서 {event.event_type} 감지"
+                    )
+                    machine_state_manager.transition_to(
+                        MachineState.STOPPED,
+                        reason="공정 종료됨"
+                    )
+                    machine_state_manager.transition_to(
+                        MachineState.IDLE,
+                        reason="대기 상태로 복귀"
+                    )
+                
+                # WebSocket으로 프론트엔드에 알림 (저장 경로 포함)
+                if websocket_manager:
+                    await websocket_manager.broadcast_data({
+                        "type": "auto_save_event",
+                        "event": "stop",
+                        "reason": event.event_type,
+                        "save_path": save_path,
+                        "data_count": data_count,
+                        "timestamp": datetime.now().isoformat()
+                    })
+            except Exception as e:
+                logger.error(f"❌ 자동저장 종료/저장 실패: {e}")
+    
+    trace_watcher.on_event(on_trace_event)
+    await trace_watcher.start()
+    logger.info("✅ DED Trace 파일 감시자 시작 완료")
+    
     # 데이터 수집 태스크 시작
     logger.info("🔄 데이터 수집 태스크 시작 중...")
     data_collection_task = asyncio.create_task(collect_sensor_data())
@@ -196,6 +290,11 @@ async def lifespan(app: FastAPI):
     # 정리 작업
     logger.info("=" * 80)
     logger.info("🛑 백엔드 서버 종료 중...")
+    
+    # Trace 파일 감시자 종료
+    if trace_watcher:
+        await trace_watcher.stop()
+        logger.info("📋 Trace 파일 감시자 종료")
     
     # Slack 알림기 리소스 정리
     if slack_notifier:
@@ -586,17 +685,59 @@ def generate_mjpeg_frames(image_type: str):
     FRAME_INTERVAL = 0.033  # ~30fps (33ms)
     JPEG_QUALITY = 75  # 품질 (속도 vs 품질 균형)
     
+    # "No Signal" 플레이스홀더 이미지 생성 (720x520, 검정 배경에 흰색 텍스트)
+    no_signal_frame = np.zeros((520, 720, 3), dtype=np.uint8)
+    cv2.putText(no_signal_frame, "No Signal", (220, 260), 
+                cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+    cv2.putText(no_signal_frame, "Waiting for camera...", (180, 320), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
+    
+    frame_count = 0
+    no_frame_count = 0
+    
+    # 스트리밍 시작 로그 (항상 출력)
+    print(f"[MJPEG] 🎬 스트리밍 제너레이터 시작: {image_type}")
+    
     while True:
         try:
             frame = None
             
             if image_type == "basler":
-                if (sensor_manager and 
-                    sensor_manager.connection_status.get("camera") and 
-                    "camera" in sensor_manager.databases):
+                # 디버그: 카메라 상태 확인
+                cam_connected = sensor_manager.connection_status.get("camera") if sensor_manager else False
+                cam_in_db = "camera" in sensor_manager.databases if sensor_manager else False
+                
+                # 첫 프레임에서 상태 출력
+                if frame_count == 0 and no_frame_count == 0:
+                    print(f"[MJPEG] 📷 Basler 상태 - 연결: {cam_connected}, DB존재: {cam_in_db}")
+                    logger.info(f"[Basler Stream] 상태 체크 - 연결: {cam_connected}, DB: {cam_in_db}")
+                
+                if sensor_manager and cam_connected and cam_in_db:
                     camera_data = sensor_manager.databases["camera"].retrieve_data()
                     if camera_data and camera_data.get("image") is not None:
                         frame = camera_data["image"]
+                        frame_count += 1
+                        no_frame_count = 0
+                        
+                        # Mono8 이미지를 BGR로 변환 (JPEG 인코딩을 위해)
+                        if len(frame.shape) == 2:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                        
+                        # 100프레임마다 상태 로그 (이미지 밝기 정보 포함)
+                        if frame_count % 100 == 1:
+                            avg_brightness = np.mean(frame)
+                            max_val = np.max(frame)
+                            print(f"[MJPEG] ✅ 프레임 #{frame_count}, shape: {frame.shape}, 밝기: {avg_brightness:.1f}, 최대값: {max_val}")
+                    else:
+                        no_frame_count += 1
+                        if no_frame_count % 30 == 1:  # 1초마다 로그
+                            print(f"[MJPEG] ⚠️ 프레임 없음 (연속 {no_frame_count}회)")
+                            logger.warning(f"[Basler Stream] 프레임 없음 (연속 {no_frame_count}회), camera_data: {camera_data is not None}")
+                else:
+                    no_frame_count += 1
+                    if no_frame_count % 30 == 1:
+                        print(f"[MJPEG] ❌ 카메라 미연결 - 연결: {cam_connected}, DB: {cam_in_db}")
+                        logger.warning(f"[Basler Stream] 카메라 미연결 - 연결: {cam_connected}, DB: {cam_in_db}")
             
             elif image_type == "hik":
                 if (sensor_manager and 
@@ -605,19 +746,19 @@ def generate_mjpeg_frames(image_type: str):
                     hik_data = sensor_manager._get_combined_hik_image()
                     if hik_data and hik_data.get("combined_image") is not None:
                         frame = hik_data["combined_image"]
+                        frame_count += 1
             
-            if frame is not None:
-                # JPEG로 인코딩 (PNG보다 훨씬 빠름)
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-                frame_bytes = buffer.tobytes()
-                
-                # MJPEG 프레임 형식으로 yield
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            else:
-                # 프레임이 없으면 짧은 대기 후 재시도
-                time.sleep(0.1)
-                continue
+            # 프레임이 없으면 "No Signal" 이미지 사용
+            if frame is None:
+                frame = no_signal_frame
+            
+            # JPEG로 인코딩
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+            frame_bytes = buffer.tobytes()
+            
+            # MJPEG 프레임 형식으로 yield
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
             # 프레임 간격 유지 (30fps)
             time.sleep(FRAME_INTERVAL)
@@ -825,7 +966,15 @@ async def upload_nc_file(file: UploadFile = File(...)):
         
         if result.get("success"):
             nc_path_data = result
+            path_points = result.get("path_points", [])
+            bounds = result.get("bounds", {})
+            
             logger.info(f"✅ NC코드 파싱 완료: {result['total_points']}개 포인트")
+            logger.info(f"   📍 경로 포인트: {len(path_points)}개")
+            logger.info(f"   📐 경계: X({bounds.get('x_min', 0):.2f} ~ {bounds.get('x_max', 0):.2f}), Y({bounds.get('y_min', 0):.2f} ~ {bounds.get('y_max', 0):.2f})")
+            if path_points:
+                logger.info(f"   🔵 첫 포인트: {path_points[0]}")
+                logger.info(f"   🔴 끝 포인트: {path_points[-1]}")
             
             return {
                 "success": True,
@@ -853,7 +1002,14 @@ async def get_nc_path():
     
     if nc_path_data is None:
         logger.debug("NC코드 경로 데이터 없음")
-        raise HTTPException(status_code=404, detail="NC코드 데이터가 없습니다. 파일을 먼저 업로드해주세요.")
+        # 404 대신 200으로 "데이터 없음" 응답 (프론트엔드 오류 방지)
+        return {
+            "success": False,
+            "has_data": False,
+            "message": "NC코드 데이터가 없습니다. 파일을 먼저 업로드해주세요.",
+            "path_points": [],
+            "total_points": 0
+        }
     
     return nc_path_data
 
@@ -909,11 +1065,11 @@ async def get_nc_progress():
         has_cnc_data = False
         closest_index = 0
         
-        if latest_data and latest_data.get("cnc_data"):
-            cnc_data = latest_data["cnc_data"]
-            current_x = cnc_data.get("curpos_x", 0) or 0
-            current_y = cnc_data.get("curpos_y", 0) or 0
-            current_z = cnc_data.get("curpos_z", 0) or 0
+        # 정규화된 데이터에서 CNC 좌표 직접 읽기 (curpos_x, curpos_y, curpos_z)
+        if latest_data and latest_data.get("curpos_x") is not None:
+            current_x = latest_data.get("curpos_x", 0) or 0
+            current_y = latest_data.get("curpos_y", 0) or 0
+            current_z = latest_data.get("curpos_z", 0) or 0
             has_cnc_data = True
             
             # 현재 위치에 가장 가까운 경로 포인트 찾기
@@ -947,6 +1103,11 @@ async def get_nc_progress():
         
         # 진행률 계산
         progress = ((total_distance - remaining_distance) / total_distance * 100) if total_distance > 0 else 0
+        
+        # 디버그: 10번에 1번 로그 출력
+        import random
+        if random.random() < 0.1:
+            logger.info(f"📊 진행률: {progress:.1f}%, CNC연결: {has_cnc_data}, 인덱스: {closest_index}/{total_points}, 위치: ({current_x:.1f}, {current_y:.1f})")
         
         return {
             "success": True,
@@ -1029,6 +1190,51 @@ async def check_file_exists(request: FileExistsRequest):
     except Exception as e:
         logger.error(f"❌ 파일 존재 확인 실패: {e}")
         return {"exists": False}
+
+
+# ============================================================
+# DED Trace 파일 감시 관련 API 엔드포인트
+# ============================================================
+
+@app.get("/api/trace/status")
+async def get_trace_watcher_status():
+    """Trace 파일 감시자 상태 조회"""
+    if not trace_watcher:
+        return {
+            "success": False,
+            "message": "Trace 감시자가 초기화되지 않았습니다"
+        }
+    
+    return {
+        "success": True,
+        **trace_watcher.get_status(),
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api/autosave/status")
+async def get_autosave_status():
+    """자동저장 상태 조회 (프론트엔드용)"""
+    is_auto_saving = False
+    current_session = None
+    
+    if trace_watcher:
+        status = trace_watcher.get_status()
+        is_auto_saving = status.get('is_process_running', False)
+        current_session = status.get('current_session_id')
+    
+    # 임시 저장 정보도 함께 반환
+    temp_info = {}
+    if data_storage:
+        temp_info = data_storage.get_temp_storage_info()
+    
+    return {
+        "success": True,
+        "is_auto_saving": is_auto_saving,
+        "current_session": current_session,
+        "temp_storage": temp_info,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 # ============================================================
@@ -1228,7 +1434,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.warning(f"⚠️ Ping 전송 실패: {client_host} - {ping_error}")
                     raise  # 연결 끊김으로 처리
             except Exception as recv_error:
-                logger.warning(f"⚠️ 메시지 수신 오류: {client_host} - {recv_error}")
+                # 브라우저 새로고침/닫기 시 발생하는 1006 에러는 DEBUG 레벨로 처리
+                error_str = str(recv_error)
+                if "1006" in error_str or "1001" in error_str or "1000" in error_str:
+                    logger.debug(f"🔌 클라이언트 연결 종료: {client_host} - {recv_error}")
+                else:
+                    logger.warning(f"⚠️ 메시지 수신 오류: {client_host} - {recv_error}")
                 raise
                 
     except WebSocketDisconnect:
