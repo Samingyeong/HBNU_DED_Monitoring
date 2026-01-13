@@ -224,23 +224,24 @@ class DataStorage:
             raise Exception("이미 저장 중입니다")
         
         try:
-            # 저장 폴더 생성
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # 저장 폴더 생성 (YYMMDD_HHMMSS 형식)
+            timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
             self.save_folder = os.path.join(
-                self.base_db_path, 
-                f"{folder_name}_{timestamp}"
+                self.base_db_path,
+                timestamp
             )
             os.makedirs(self.save_folder, exist_ok=True)
-            
-            # 이미지 저장 폴더 생성
-            self.image_save_dir = os.path.join(self.save_folder, "meltpool_images")
-            self.hik_save_dir = os.path.join(self.save_folder, "captures_hik")
+
+            # Basler 이미지 저장 폴더: DB\YYMMDD_HHMMSS\image
+            self.image_save_dir = os.path.join(self.save_folder, "image")
             os.makedirs(self.image_save_dir, exist_ok=True)
-            os.makedirs(self.hik_save_dir, exist_ok=True)
-            
-            # CSV 파일 경로 설정
+
+            # Hik 이미지 저장 경로는 그대로 메인 폴더 사용
+            self.hik_save_dir = self.save_folder
+
+            # CSV 파일 경로 설정 (DB\YYMMDD_HHMMSS\YYMMDD_HHMMSS.csv)
             self.current_save_path = os.path.join(
-                self.save_folder, 
+                self.save_folder,
                 f"{timestamp}.csv"
             )
             
@@ -293,7 +294,7 @@ class DataStorage:
                 
                 if self.is_saving and self.save_folder:
                     # 새 CSV 파일 생성
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
                     self.current_save_path = os.path.join(
                         self.save_folder, 
                         f"{timestamp}.csv"
