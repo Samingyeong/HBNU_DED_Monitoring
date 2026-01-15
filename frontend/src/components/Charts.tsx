@@ -73,7 +73,7 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
           lines: [
             { dataKey: 'meltPoolArea', name: 'Melt Pool Area', color: '#3b82f6', stroke: '#3b82f6' }
           ],
-          yAxisDomain: [0, 50]
+          yAxisDomain: [-0.5, 5]
         };
       
       case 'laserPower':
