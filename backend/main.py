@@ -507,7 +507,7 @@ async def start_saving(request: SaveRequest):
             
             # Basler 카메라 이미지 저장 시작 (공정 폴더 안에 basler_images 폴더)
             if sensor_manager and "camera" in sensor_manager.collectors:
-                basler_save_dir = os.path.join(save_path, "basler_images")
+                basler_save_dir = os.path.join(save_path, "image")
                 sensor_manager.collectors["camera"].set_save_dir(basler_save_dir)
                 logger.info(f"📷 Basler 이미지 저장 시작: {basler_save_dir}")
             
