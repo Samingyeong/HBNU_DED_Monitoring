@@ -301,3 +301,8 @@ test_*.png
 
 # DED Recipe files (레시피 파일은 로컬에서만 관리)
 Sensors/DED_Recipe_*.rcp
+
+# Local machine configs (do not commit)
+config/*.ini
+backend/config/
+*.ini
