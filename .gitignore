@@ -306,3 +306,8 @@ Sensors/DED_Recipe_*.rcp
 config/*.ini
 backend/config/
 *.ini
+# binaries / installers / manuals
+*.dll
+*.exe
+*.pdf
+DB/
