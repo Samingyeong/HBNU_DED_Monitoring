@@ -132,7 +132,14 @@ class CnCSensor(BaseSensor):
         # HxGetRB (R Register Bit)
         self._hx.HxGetRB.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
         self._hx.HxGetRB.restype = ctypes.c_bool
-    
+        # HxGetSystemEmg (비상정지, Hx20Api 등에 있음. 없으면 무시)
+        try:
+            if hasattr(self._hx, 'HxGetSystemEmg'):
+                self._hx.HxGetSystemEmg.argtypes = [ctypes.c_int32]
+                self._hx.HxGetSystemEmg.restype = ctypes.c_bool
+        except Exception:
+            pass
+
     def _do_disconnect(self) -> None:
         """DLL 연결 해제"""
         self._hx = None
@@ -174,7 +181,15 @@ class CnCSensor(BaseSensor):
                 'rapid_override': self._hx.HxGetSVF(0, 676),
                 'feed_rate': self._hx.HxGetSVF(0, 722),
             }
-            
+            # 비상정지(E-STOP): HxGetSystemEmg 지원 시 사용
+            try:
+                if hasattr(self._hx, 'HxGetSystemEmg'):
+                    data['estop'] = bool(self._hx.HxGetSystemEmg(0))
+                else:
+                    data['estop'] = False
+            except Exception:
+                data['estop'] = False
+
             return data
             
         except Exception as e:

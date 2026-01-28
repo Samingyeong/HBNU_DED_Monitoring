@@ -260,9 +260,10 @@ class SlackNotifier:
         return await self.send_event(test_event)
     
     def get_stats(self) -> Dict:
-        """전송 통계"""
+        """전송 통계 (webhook_configured: URL 설정 여부, URL 자체는 노출 안 함)"""
         return {
             "enabled": self._config.enabled,
+            "webhook_configured": bool(self._config.webhook_url and self._config.webhook_url.strip()),
             "send_count": self._send_count,
             "error_count": self._error_count,
             "equipment_id": self._config.equipment_id,

@@ -5,10 +5,11 @@ import React, { useState } from 'react';
 
 interface InitialSetupModalProps {
   isOpen: boolean;
-  onComplete: (operatorName: string) => void;
+  onComplete: (combinedName: string) => void;
 }
 
 const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplete }) => {
+  const [processName, setProcessName] = useState('');
   const [operatorName, setOperatorName] = useState('');
   
 
@@ -17,13 +18,19 @@ const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplet
   // NC 업로드 제거: 파일 선택 기능 비활성화
 
   const handleSubmit = async () => {
-    if (!operatorName.trim()) {
-      alert('작업자명을 입력해주세요.');
+    if (!processName.trim()) {
+      alert('공정명을 입력해주세요.');
       return;
     }
 
-    // NC 기능 제거: 작업자명만 전달
-    onComplete(operatorName);
+    if (!operatorName.trim()) {
+      alert('이름을 입력해주세요.');
+      return;
+    }
+
+    // 공정명_이름 결합해서 전달 (예: 공정A_홍길동)
+    const combinedName = `${processName.trim()}_${operatorName.trim()}`;
+    onComplete(combinedName);
   };
 
   return (
@@ -34,14 +41,34 @@ const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplet
             <span className="text-white font-bold text-2xl">H</span>
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">공정 시작 설정</h2>
-          <p className="text-sm text-gray-500">작업자명과 NC코드 파일을 설정해주세요</p>
+          <p className="text-sm text-gray-500">공정명과 작업자 이름을 입력해주세요</p>
         </div>
 
         <div className="space-y-4">
-          {/* 작업자명 입력 */}
+          {/* 공정명 입력 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              작업자명 <span className="text-red-500">*</span>
+              공정명 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={processName}
+              onChange={(e) => setProcessName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSubmit();
+                }
+              }}
+              placeholder="공정명을 입력하세요"
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              autoFocus
+            />
+          </div>
+
+          {/* 작업자 이름 입력 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              작업자 이름 <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -52,27 +79,28 @@ const InitialSetupModal: React.FC<InitialSetupModalProps> = ({ isOpen, onComplet
                   handleSubmit();
                 }
               }}
-              placeholder="작업자명을 입력하세요"
+              placeholder="작업자 이름을 입력하세요"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              autoFocus
             />
           </div>
 
           {/* NC 업로드 제거됨 */}
 
           {/* 미리보기 */}
-          {operatorName && (
+          {processName && operatorName && (
             <div className="bg-blue-50 p-3 rounded-lg">
               <p className="text-xs text-gray-600 mb-1">폴더명 미리보기:</p>
               <p className="text-sm font-mono text-blue-700">
                 {(() => {
                   const now = new Date();
-                  const year = now.getFullYear();
+                  const year = String(now.getFullYear()).slice(2);
                   const month = String(now.getMonth() + 1).padStart(2, '0');
                   const day = String(now.getDate()).padStart(2, '0');
                   const hour = String(now.getHours()).padStart(2, '0');
                   const minute = String(now.getMinutes()).padStart(2, '0');
-                  return `${year}${month}${day}_${hour}${minute}_${operatorName}`;
+                  const second = String(now.getSeconds()).padStart(2, '0');
+                  const combinedName = `${processName.trim()}_${operatorName.trim()}`;
+                  return `${year}${month}${day}_${hour}${minute}${second}_${combinedName}`;
                 })()}
               </p>
             </div>

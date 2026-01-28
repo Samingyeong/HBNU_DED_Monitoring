@@ -208,12 +208,13 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       return;
     }
 
-    // Canvas 크기 설정
-    const container = canvas.parentElement;
-    const size = container ? Math.min(container.clientWidth, container.clientHeight, 350) : 300;
-    canvas.width = size;
-    canvas.height = size;
-    console.log('[ToolPath Canvas] 캔버스 크기:', size, 'x', size);
+    // Canvas 크기 설정 (고정 크기로 설정하여 크기 변화 방지)
+    const FIXED_SIZE = 300;  // 고정 크기
+    if (canvas.width !== FIXED_SIZE || canvas.height !== FIXED_SIZE) {
+      canvas.width = FIXED_SIZE;
+      canvas.height = FIXED_SIZE;
+      console.log('[ToolPath Canvas] 캔버스 크기 고정:', FIXED_SIZE, 'x', FIXED_SIZE);
+    }
 
     // 배경 초기화
     ctx.fillStyle = '#f9fafb';
@@ -235,8 +236,11 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
 
     // 좌표 변환 함수 (NC코드 좌표 → Canvas 좌표)
     const padding = 25;
-    const scaleX = (canvas.width - 2 * padding) / (bounds.x_range || 1);
-    const scaleY = (canvas.height - 2 * padding) / (bounds.y_range || 1);
+    // 범위가 0이거나 음수인 경우를 방지
+    const xRange = Math.max(bounds.x_range || 1, 0.001);
+    const yRange = Math.max(bounds.y_range || 1, 0.001);
+    const scaleX = (canvas.width - 2 * padding) / xRange;
+    const scaleY = (canvas.height - 2 * padding) / yRange;
     const scale = Math.min(scaleX, scaleY);
 
     const toCanvasX = (x: number) => padding + (x - bounds.x_min) * scale;
@@ -246,11 +250,20 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
     const currentIndex = progressData?.current_index || 0;
     const currentX = progressData?.current_position?.x || path_points[0]?.x || 0;
     const currentY = progressData?.current_position?.y || path_points[0]?.y || 0;
+    const currentZ =
+      progressData?.current_position?.z ??
+      path_points[Math.min(currentIndex, path_points.length - 1)]?.z ??
+      path_points[0]?.z ??
+      0;
     const progress = progressData?.progress || 0;
     const totalDistance = progressData?.total_distance || 0;
     const remainingDistance = progressData?.remaining_distance || 0;
 
-    // 전체 경로 그리기 (G00: 빨강 점선, G01: 초록 실선)
+    // 전체 경로를 빨간 점선으로 먼저 그리기 (모든 레이어 공통 베이스 경로)
+    ctx.strokeStyle = '#ef4444';  // 빨간색
+    ctx.setLineDash([4, 4]);  // 점선
+    ctx.lineWidth = 1.5;
+    
     for (let i = 0; i < path_points.length - 1; i++) {
       const p1 = path_points[i];
       const p2 = path_points[i + 1];
@@ -259,58 +272,79 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       const x2 = toCanvasX(p2.x);
       const y2 = toCanvasY(p2.y);
       
-    ctx.beginPath();
+      ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
-      
-      // G00 (rapid) = 빨간색 점선, G01 (linear) = 초록색 실선
-      if (p2.type === 'rapid') {
-        ctx.strokeStyle = '#fca5a5';  // 연한 빨강 (G00)
-        ctx.setLineDash([4, 4]);
-        ctx.lineWidth = 1;
-      } else {
-        ctx.strokeStyle = '#86efac';  // 연한 초록 (G01)
-        ctx.setLineDash([]);
-        ctx.lineWidth = 1.5;
-      }
-      
-    ctx.stroke();
+      ctx.stroke();
     }
-    ctx.setLineDash([]);
-
-    // 완료된 경로 강조 (주황색 선으로 진행된 경로 표시)
-    // CNC 데이터가 있거나 currentIndex > 0일 때 진행 경로 그리기
-    const hasCncConnection = progressData?.has_cnc_data;
     
-    if (currentIndex > 0 || hasCncConnection) {
-      // 주황색 선으로 완료된 경로 그리기
-      ctx.beginPath();
-      ctx.strokeStyle = '#f97316';  // 주황색 (현재 위치 점과 동일)
-      ctx.setLineDash([]);
-      ctx.lineWidth = 3;
+    // 헤드가 실제로 지나간 "현재 레이어(Z)"의 경로만 빨간 실선으로 덮어그리기
+    // → currentIndex가 0일 때(아직 적층 시작 전)에는 실선이 나오지 않도록 함
+    // → Z가 다른 레이어의 경로는 계속 점선으로만 남게 함
+    if (currentIndex > 0 && path_points.length > 1) {
+      const lastIndex = Math.min(currentIndex, path_points.length - 1);
+      const layerTolerance =
+        bounds.z_range > 0 ? Math.max(bounds.z_range * 0.01, 0.05) : 0.05; // 전체 Z범위의 1% 또는 최소 0.05mm
+
+      ctx.strokeStyle = '#ef4444';  // 빨간색 (점선과 동일한 색상)
+      ctx.setLineDash([]);          // 실선
+      ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      
-      // 시작점으로 이동
-      const startPoint = path_points[0];
-      ctx.moveTo(toCanvasX(startPoint.x), toCanvasY(startPoint.y));
-      
-      // 현재 인덱스까지 선 그리기 (경로 포인트를 따라)
-      for (let i = 1; i <= currentIndex && i < path_points.length; i++) {
-        const point = path_points[i];
-        ctx.lineTo(toCanvasX(point.x), toCanvasY(point.y));
+
+      // 1) 현재 레이어(Z 근처)에 있는 선분만 실선으로 다시 그리기
+      for (let i = 0; i < lastIndex; i++) {
+        const p1 = path_points[i];
+        const p2 = path_points[i + 1];
+
+        const onCurrentLayer =
+          Math.abs(p1.z - currentZ) <= layerTolerance &&
+          Math.abs(p2.z - currentZ) <= layerTolerance;
+
+        if (!onCurrentLayer) continue;
+
+        ctx.beginPath();
+        ctx.moveTo(toCanvasX(p1.x), toCanvasY(p1.y));
+        ctx.lineTo(toCanvasX(p2.x), toCanvasY(p2.y));
+        ctx.stroke();
       }
-      
-      // 현재 CNC 위치까지 연결 (실제 좌표로 마무리)
-      ctx.lineTo(toCanvasX(currentX), toCanvasY(currentY));
-      
-      ctx.stroke();
-      
+
+      // 2) 현재 레이어 중에서, 현재 위치와 가장 가까운 포인트를 찾아
+      //    그 포인트에서 실제 currentX/currentY까지 짧은 빨간 선으로 이어줌
+      let nearestIndex = -1;
+      let nearestDist = Number.MAX_VALUE;
+      for (let i = 0; i <= lastIndex; i++) {
+        const p = path_points[i];
+        const onCurrentLayer = Math.abs(p.z - currentZ) <= layerTolerance;
+        if (!onCurrentLayer) continue;
+        const dx = p.x - currentX;
+        const dy = p.y - currentY;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < nearestDist) {
+          nearestDist = dist2;
+          nearestIndex = i;
+        }
+      }
+
+      if (nearestIndex >= 0) {
+        const p = path_points[nearestIndex];
+        ctx.beginPath();
+        ctx.moveTo(toCanvasX(p.x), toCanvasY(p.y));
+        ctx.lineTo(toCanvasX(currentX), toCanvasY(currentY));
+        ctx.stroke();
+      }
+
       // 디버그: 콘솔에 진행 상태 출력 (개발 중에만)
       if (currentIndex % 10 === 0) {
-        console.log(`[ToolPath] 진행: ${currentIndex}/${path_points.length}, 위치: (${currentX.toFixed(1)}, ${currentY.toFixed(1)})`);
+        console.log(
+          `[ToolPath] 진행: ${currentIndex}/${path_points.length}, 위치: (${currentX.toFixed(
+            1
+          )}, ${currentY.toFixed(1)}, Z=${currentZ.toFixed(2)})`
+        );
       }
     }
+    
+    ctx.setLineDash([]);
 
     // 시작점 표시 (파란색)
     if (path_points.length > 0) {
@@ -460,18 +494,22 @@ const ToolPath: React.FC<ToolPathProps> = ({ className }) => {
       
       {/* 범례 */}
       <div className="flex items-center justify-center space-x-3 text-xs text-gray-500 mb-1">
-        <span className="flex items-center"><span className="w-3 h-0.5 bg-red-400 mr-1"></span>G00</span>
-        <span className="flex items-center"><span className="w-3 h-0.5 bg-green-500 mr-1"></span>G01</span>
+        <span className="flex items-center">
+          <span className="w-3 h-0.5 border-t-2 border-dashed border-red-500 mr-1"></span>예정 경로
+        </span>
+        <span className="flex items-center">
+          <span className="w-3 h-0.5 bg-red-500 mr-1"></span>완료 경로
+        </span>
         <span className="flex items-center"><span className="w-2 h-2 bg-blue-500 rounded-full mr-1"></span>시작</span>
         <span className="flex items-center"><span className="w-2 h-2 bg-orange-500 rounded-full mr-1"></span>현재</span>
       </div>
       
       {/* Canvas */}
       <div className="flex-1 flex items-center justify-center">
-      <canvas
-        ref={canvasRef}
-        className="border border-gray-200 rounded-lg"
-      />
+        <canvas
+          ref={canvasRef}
+          className="border border-gray-200 rounded-lg w-[300px] h-[300px] flex-none"
+        />
       </div>
     </div>
   );

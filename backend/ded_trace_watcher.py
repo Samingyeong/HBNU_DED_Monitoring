@@ -200,7 +200,7 @@ class DEDTraceWatcher:
             
             # 새 줄들에서 패턴 매칭
             for line in new_lines:
-                await self._match_patterns(line, file_path)
+                await self._match_patterns(line, file_path, new_lines)
             
             # 마지막 처리 줄 업데이트
             if lines:
@@ -209,8 +209,11 @@ class DEDTraceWatcher:
         except Exception as e:
             logger.error(f"❌ Trace 파일 처리 오류: {e}")
     
-    async def _match_patterns(self, line: str, file_path: str):
-        """패턴 매칭"""
+    # 비상정지 관련 키워드 (Trace 로그에서 E-stop 추정용)
+    _ESTOP_KEYWORDS = ('estop', 'e-stop', 'emergency', 'emg', '비상', 'esstop', 'emgstop')
+
+    async def _match_patterns(self, line: str, file_path: str, context_lines: list = None):
+        """패턴 매칭. context_lines: process_end 시 비상 키워드 검사용."""
         # 타임스탬프 추출 시도
         timestamp = ""
         if ',' in line:
@@ -223,7 +226,7 @@ class DEDTraceWatcher:
         if all(pattern in line for pattern in start_patterns):
             if not self._is_process_running:
                 self._is_process_running = True
-                self._current_session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                self._current_session_id = datetime.now().strftime('%y%m%d_%H%M%S')
                 
                 event = TraceEvent(
                     event_type='process_start',
@@ -242,16 +245,22 @@ class DEDTraceWatcher:
             if pattern in line:
                 if self._is_process_running:
                     self._is_process_running = False
-                    
+                    # Trace 최근 줄에 비상정지 관련 키워드 있으면 estop 추정
+                    haystack = (context_lines or [line])
+                    estop_in_trace = any(
+                        kw in (l or '').lower() for l in haystack for kw in self._ESTOP_KEYWORDS
+                    )
+                    meta = {'session_id': self._current_session_id, 'estop': bool(estop_in_trace)}
+                    if estop_in_trace:
+                        meta['estop_reason'] = 'Trace 파일 내 비상/긴급 관련 로그 감지'
                     event = TraceEvent(
                         event_type='process_end',
                         timestamp=timestamp or datetime.now().isoformat(),
                         message=line,
                         file_path=file_path,
-                        metadata={'session_id': self._current_session_id}
+                        metadata=meta
                     )
-                    
-                    logger.info(f"🛑 공정 종료 감지: {self._current_session_id}")
+                    logger.info(f"🛑 공정 종료 감지: {self._current_session_id} (estop={estop_in_trace})")
                     self._current_session_id = None
                     await self._emit_event(event)
                 return
@@ -261,16 +270,21 @@ class DEDTraceWatcher:
             if pattern in line:
                 if self._is_process_running:
                     self._is_process_running = False
-                    
+                    haystack = (context_lines or [line])
+                    estop_in_trace = any(
+                        kw in (l or '').lower() for l in haystack for kw in self._ESTOP_KEYWORDS
+                    )
+                    meta = {'session_id': self._current_session_id, 'estop': bool(estop_in_trace)}
+                    if estop_in_trace:
+                        meta['estop_reason'] = 'Trace 파일 내 비상/긴급 관련 로그 감지'
                     event = TraceEvent(
                         event_type='system_shutdown',
                         timestamp=timestamp or datetime.now().isoformat(),
                         message=line,
                         file_path=file_path,
-                        metadata={'session_id': self._current_session_id}
+                        metadata=meta
                     )
-                    
-                    logger.info(f"⚠️ 시스템 종료 감지")
+                    logger.info(f"⚠️ 시스템 종료 감지 (estop={estop_in_trace})")
                     self._current_session_id = None
                     await self._emit_event(event)
                 return

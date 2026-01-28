@@ -23,14 +23,18 @@ export const useSensorData = (): UseSensorDataResult => {
   // API를 통해 초기 데이터 및 상태를 가져오는 함수
   const fetchInitialData = useCallback(async () => {
     try {
-      const [status, latest, saveStat] = await Promise.all([
+      const [status, latest, saveStat, history] = await Promise.all([
         ApiService.getSystemStatus(),
         ApiService.getLatestData(),
         ApiService.getSaveStatus(),
+        ApiService.getDataHistory(100).catch(() => []),
       ]);
       setSystemStatus(status);
       setLatestData(latest);
       setSaveStatus(saveStat);
+      if (Array.isArray(history) && history.length > 0) {
+        setHistoryData(history);
+      }
       setIsConnected(true);
       setError(null);
     } catch (err: any) {

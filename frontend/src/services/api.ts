@@ -42,6 +42,28 @@ apiClient.interceptors.response.use(
 // 타입 정의
 export interface SensorData {
   timestamp: string;
+
+  // ✅ 백엔드 정규화(flat) 데이터 (DataStorage.get_latest_data)
+  // CNC 위치
+  curpos_x?: number;
+  curpos_y?: number;
+  curpos_z?: number;
+  curpos_a?: number;
+  curpos_c?: number;
+
+  // Measurement Height (mm)
+  height_mm?: number;
+
+  // 가스 (GuiState / Measurement CSV에서 병합)
+  powder_gas?: number;
+  coaxial_gas?: number;
+  shield_gas?: number;
+
+  // 피더 RPM (Measurement CSV에서 병합)
+  feeder1_rpm?: number;
+  feeder2_rpm?: number;
+  feeder3_rpm?: number;
+
   camera_data?: {
     image?: string;
     melt_pool_area?: number;
@@ -61,6 +83,13 @@ export interface SensorData {
     curpos_z?: number;
     curpos_a?: number;
     curpos_c?: number;
+    // 일부 CNC 구현에서 피더/가스를 nested로 줄 수도 있어 여기도 허용
+    powder_gas?: number;
+    coaxial_gas?: number;
+    shield_gas?: number;
+    feeder1_rpm?: number;
+    feeder2_rpm?: number;
+    feeder3_rpm?: number;
   };
   hik_camera_data?: {
     combined_image?: string;
@@ -96,6 +125,10 @@ export interface SaveStatus {
   timestamp: string;
 }
 
+export interface ProcessNameRequest {
+  process_name: string;
+}
+
 // API 서비스 클래스
 export class ApiService {
   /**
@@ -128,6 +161,13 @@ export class ApiService {
   static async startSaving(request: SaveRequest): Promise<SaveResponse> {
     const response = await apiClient.post('/api/save/start', request);
     return response.data;
+  }
+
+  /**
+   * 공정명 설정
+   */
+  static async setProcessName(request: ProcessNameRequest): Promise<void> {
+    await apiClient.post('/api/process/name', request);
   }
 
   /**

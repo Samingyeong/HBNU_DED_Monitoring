@@ -29,6 +29,7 @@ try:
     from sensors.laser import LaserSensor
     from sensors.pyrometer import PyrometerSensor
     from sensors.cnc import CnCSensor
+    # from sensors import ccd_camera  # Hik CCD 센서 비활성화 (장비 SW와 충돌 방지)
     NEW_SENSORS_AVAILABLE = True
     logger.info("✅ GoF 패턴 기반 센서 모듈 로드 완료")
 except ImportError as e:
@@ -113,6 +114,8 @@ class SensorManager:
         self.databases = {}
         self.connection_status = {}
         self.hik_cam_threads = {}
+        # Hikrobot 최신 프레임/데이터 (스트리밍에서 사용)
+        self.latest_hik_data = None
         self.use_cnc_subprocess = use_cnc_subprocess
         self.cnc_subprocess_manager = None
         
@@ -211,43 +214,65 @@ class SensorManager:
             await self._initialize_camera()
         
         # 나머지 센서는 Factory 패턴으로 초기화
+        # Hik CCD 카메라는 장비 SW와 카메라 자원 충돌이 있어 제외
         sensor_types = ['laser', 'pyrometer', 'cnc']
         
         for sensor_type in sensor_types:
             try:
                 # Factory를 통해 센서 생성
                 sensor = SensorFactory.create_safe(sensor_type)
-                
+
                 if sensor is None:
                     logger.warning(f"[{sensor_type}] 센서 생성 실패")
-                    self.connection_status[sensor_type] = False
+                    # ccd_camera는 hik_camera_1/2로 상태를 노출
+                    if sensor_type == 'ccd_camera':
+                        self.connection_status['hik_camera_1'] = False
+                        self.connection_status['hik_camera_2'] = False
+                    else:
+                        self.connection_status[sensor_type] = False
                     continue
-                
+
                 # 비동기로 연결 시도 (3초 타임아웃)
                 loop = asyncio.get_event_loop()
-                
                 try:
                     connected = await asyncio.wait_for(
                         loop.run_in_executor(None, sensor.connect),
                         timeout=3.0
                     )
-                    
+
                     if connected:
                         self._factory_sensors[sensor_type] = sensor
-                        self.connection_status[sensor_type] = True
+                        if sensor_type == 'ccd_camera':
+                            # UI/메인서버는 hik_camera_1/2 상태를 본다
+                            self.connection_status['hik_camera_1'] = True
+                            self.connection_status['hik_camera_2'] = True
+                        else:
+                            self.connection_status[sensor_type] = True
                         logger.info(f"✅ [{sensor_type}] 연결 성공 (Factory)")
                     else:
-                        self.connection_status[sensor_type] = False
+                        if sensor_type == 'ccd_camera':
+                            self.connection_status['hik_camera_1'] = False
+                            self.connection_status['hik_camera_2'] = False
+                        else:
+                            self.connection_status[sensor_type] = False
                         logger.warning(f"❌ [{sensor_type}] 연결 실패")
-                        
+
                 except asyncio.TimeoutError:
-                    self.connection_status[sensor_type] = False
+                    if sensor_type == 'ccd_camera':
+                        self.connection_status['hik_camera_1'] = False
+                        self.connection_status['hik_camera_2'] = False
+                    else:
+                        self.connection_status[sensor_type] = False
                     logger.warning(f"⏱️ [{sensor_type}] 연결 타임아웃")
-                    
+
             except Exception as e:
-                self.connection_status[sensor_type] = False
+                if sensor_type == 'ccd_camera':
+                    self.connection_status['hik_camera_1'] = False
+                    self.connection_status['hik_camera_2'] = False
+                else:
+                    self.connection_status[sensor_type] = False
                 logger.error(f"❌ [{sensor_type}] 초기화 오류: {e}")
-        
+
         logger.info("🏭 Factory 패턴 센서 초기화 완료")
     
     async def _initialize_camera(self):
@@ -269,8 +294,10 @@ class SensorManager:
                 )
                 self.databases["camera"] = CameraDB()
                 self.collectors["camera"] = CameraCollector(
-                    self.sensors["camera"], 
-                    self.databases["camera"]
+                    self.sensors["camera"],
+                    self.databases["camera"],
+                    sample_rate=30,
+                    save_interval=1.0,  # Basler 이미지 1초에 1장 저장
                 )
                 
                 self.collectors["camera"].start()
@@ -555,8 +582,22 @@ class SensorManager:
     
     async def _collect_from_factory_sensors(self, sensor_data: Dict, loop) -> Dict:
         """Factory 패턴 센서에서 데이터 수집"""
+
+        use_factory_ccd = 'ccd_camera' in self._factory_sensors
         
-        # 카메라 데이터
+        # Basler 카메라(melt_pool_area): Factory에 'camera' 없음 → 레거시 databases["camera"]에서 수집
+        if sensor_data.get("camera_data") is None and self.connection_status.get("camera") and "camera" in getattr(self, "databases", {}):
+            try:
+                camera_data = await loop.run_in_executor(None, self.databases["camera"].retrieve_data)
+                if camera_data:
+                    sensor_data["camera_data"] = {
+                        "melt_pool_area": camera_data.get("melt_pool_area", 0),
+                        "image_available": camera_data.get("image") is not None
+                    }
+            except Exception as e:
+                logger.warning(f"Basler(레거시) 카메라 데이터 수집 오류: {e}")
+
+        # 카메라 데이터 (Factory에 'camera'가 있는 경우 — 현재는 Basler는 레거시만 사용)
         if 'camera' in self._factory_sensors:
             try:
                 camera_data = await loop.run_in_executor(
@@ -607,17 +648,32 @@ class SensorManager:
                     sensor_data["cnc_data"] = cnc_data
             except Exception as e:
                 logger.warning(f"CNC 데이터 수집 오류: {e}")
-        
-        # HikRobot 카메라 (레거시 유지)
-        if (self.connection_status["hik_camera_1"] and 
-            self.connection_status["hik_camera_2"]):
+
+        # CCD 카메라 데이터 (Factory: Hikrobot CCD)
+        if 'ccd_camera' in self._factory_sensors:
             try:
-                hik_data = self._get_combined_hik_image()
+                hik_data = await loop.run_in_executor(
+                    None, self._factory_sensors['ccd_camera'].get_data
+                )
+                if hik_data:
+                    # ✅ 여기서 sensor_data["hik_camera_data"]에 CCD 높이/이미지 들어감
+                    sensor_data["hik_camera_data"] = hik_data
+                    # ✅ MJPEG 스트리밍에서 사용하도록 최신 Hik 데이터도 저장
+                    self.latest_hik_data = hik_data
+            except Exception as e:
+                logger.warning(f"CCD(Hikrobot) 데이터 수집 오류: {e}")
+
+        # ❗레거시 HikRobot 합성(기존 hik_camera_1/2) - Factory CCD가 없을 때만 실행
+        if (not use_factory_ccd) and self.connection_status["hik_camera_1"] and self.connection_status["hik_camera_2"]:
+            try:
+                hik_data = await loop.run_in_executor(None, self._get_combined_hik_image)
                 if hik_data:
                     sensor_data["hik_camera_data"] = hik_data
+                    # ✅ MJPEG 스트리밍에서 사용하도록 최신 Hik 데이터도 저장
+                    self.latest_hik_data = hik_data
             except Exception as e:
-                logger.warning(f"HikRobot 데이터 수집 오류: {e}")
-        
+                logger.warning(f"HikRobot 레거시 데이터 수집 오류: {e}")
+
         return sensor_data
     
     async def _collect_from_legacy_sensors(self, sensor_data: Dict, loop) -> Dict:
@@ -687,16 +743,27 @@ class SensorManager:
                 hik_data = self._get_combined_hik_image()
                 if hik_data:
                     sensor_data["hik_camera_data"] = hik_data
+                    # ✅ MJPEG 스트리밍에서 사용하도록 최신 Hik 데이터도 저장
+                    self.latest_hik_data = hik_data
             except Exception as e:
                 logger.warning(f"HikRobot 데이터 수집 오류: {e}")
         
-        return sensor_data
-    
+        return sensor_data 
+       
     def _get_combined_hik_image(self) -> Optional[Dict]:
-        """HikRobot 2대 이미지를 합쳐서 반환"""
-        if not self.connection_status.get("hik_camera_1") or not self.connection_status.get("hik_camera_2"):
+        """HikRobot 2대 이미지를 합쳐서 반환
+
+        - Factory(ccd_camera) 사용 시: data-collector에서 갱신한 latest_hik_data 우선 반환
+        - 레거시(vision2 thread) 사용 시: latest_frame1/2 기반 합성
+        """
+        # Factory(ccd_camera) 경로
+        if self.latest_hik_data and self.latest_hik_data.get('combined_image') is not None:
+            return self.latest_hik_data
+
+        # 레거시 경로 (vision2 thread)
+        if not self.connection_status.get('hik_camera_1') or not self.connection_status.get('hik_camera_2'):
             return None
-        
+
         if hasattr(self, 'latest_frame1') and hasattr(self, 'latest_frame2'):
             if self.latest_frame1 is not None and self.latest_frame2 is not None:
                 import cv2
@@ -704,21 +771,23 @@ class SensorManager:
                     h1, w1 = self.latest_frame1.shape[:2]
                     h2, w2 = self.latest_frame2.shape[:2]
                     h = max(h1, h2)
-                    
+
                     f1 = cv2.resize(self.latest_frame1, (w1, h))
                     f2 = cv2.resize(self.latest_frame2, (w2, h))
                     combined = cv2.hconcat([f1, f2])
-                    
-                    return {
-                        "combined_image": combined,
-                        "frame1_shape": self.latest_frame1.shape,
-                        "frame2_shape": self.latest_frame2.shape,
-                        "combined_shape": combined.shape
+
+                    out = {
+                        'combined_image': combined,
+                        'frame1_shape': self.latest_frame1.shape,
+                        'frame2_shape': self.latest_frame2.shape,
+                        'combined_shape': combined.shape
                     }
+                    self.latest_hik_data = out
+                    return out
                 except Exception as e:
-                    logger.warning(f"HikRobot 이미지 합치기 오류: {e}")
+                    logger.warning(f'HikRobot 이미지 합치기 오류: {e}')
         return None
-    
+
     async def get_connection_status(self) -> Dict[str, bool]:
         """연결 상태 조회"""
         return self.connection_status.copy()
@@ -773,3 +842,4 @@ class SensorManager:
         self._factory_sensors.clear()
         
         logger.info("센서 매니저 정리 완료")
+

@@ -28,15 +28,43 @@ interface CNCData {
 export default function CNCStatus() {
   const { latestData, systemStatus } = useSensorData();
 
-  // 실제 CNC 데이터 또는 기본값
-  const cncData: CNCData = latestData?.cnc_data || {
+  // 정규화(flat) 또는 cnc_data 중 우선. flat: curpos_*, powder_gas, coaxial_gas, shield_gas
+  const flat = (latestData || {}) as any;
+
+  // 위치(curpos)는 기존 로직 유지: flat에만 있고 cnc_data가 없을 때만 사용
+  const fromFlatPos =
+    !flat.cnc_data && (flat.curpos_x != null || flat.curpos_y != null)
+      ? {
+          curpos_x: flat.curpos_x,
+          curpos_y: flat.curpos_y,
+          curpos_z: flat.curpos_z,
+          curpos_a: flat.curpos_a,
+          curpos_c: flat.curpos_c,
+        }
+      : {};
+
+  // ✅ 가스/피더는 Measurement CSV에서 온 flat 값을 항상 우선 사용
+  const fromFlatGasFeeder = {
+    powder_gas: flat.powder_gas,
+    coaxial_gas: flat.coaxial_gas,
+    shield_gas: flat.shield_gas,
+    feeder1_rpm: flat.feeder1_rpm,
+    feeder2_rpm: flat.feeder2_rpm,
+    feeder3_rpm: flat.feeder3_rpm,
+  };
+
+  const cncData: CNCData = {
     curpos_x: 0, curpos_y: 0, curpos_z: 0, curpos_a: 0, curpos_c: 0,
     macpos_x: 0, macpos_y: 0, macpos_z: 0, macpos_a: 0, macpos_c: 0,
     feed_rate: 0, feed_override: 0, rapid_override: 0,
-    // Feed Rate 데이터 (GuiState.ini에서 읽음)
     feeder1_rpm: 0, feeder2_rpm: 0, feeder3_rpm: 0,
-    // Gas 데이터 (GuiState.ini에서 읽음)
     powder_gas: 0, coaxial_gas: 0, shield_gas: 0,
+    // 1) CNC nested 데이터 (GuiState에서 온 기본값)
+    ...(flat.cnc_data as CNCData | undefined || {}),
+    // 2) 위치: flat curpos_* (cnc_data 없을 때만)
+    ...fromFlatPos,
+    // 3) 가스/피더: 항상 Measurement(flat) 값을 우선 사용
+    ...fromFlatGasFeeder,
   };
 
   const formatValue = (value: number | undefined, decimals: number = 2): string => {
@@ -119,8 +147,6 @@ export default function CNCStatus() {
           <div className="space-y-0.5">
             {[
               { name: 'Basler Camera', key: 'camera' },
-              { name: 'HikRobot-1', key: 'hik_camera_1' },
-              { name: 'HikRobot-2', key: 'hik_camera_2' },
               { name: '2color Pyrometer', key: 'pyrometer' },
               { name: 'Laser', key: 'laser' },
               { name: 'CNC', key: 'cnc' }

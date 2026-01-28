@@ -116,7 +116,8 @@ class EventDetector:
         Returns:
             Event 객체 또는 None (이벤트 없음)
         """
-        event_type = self._determine_event_type(from_state, to_state)
+        meta = metadata or {}
+        event_type = self._determine_event_type(from_state, to_state, metadata=meta)
         
         if event_type is None:
             return None
@@ -127,7 +128,7 @@ class EventDetector:
             return None
         
         # 이벤트 생성
-        event = self._create_event(event_type, from_state, to_state, reason, metadata)
+        event = self._create_event(event_type, from_state, to_state, reason, meta)
         
         # 쿨다운 타이머 갱신
         self._last_event_times[event_type] = datetime.now()
@@ -144,20 +145,22 @@ class EventDetector:
     def _determine_event_type(
         self, 
         from_state: str, 
-        to_state: str
+        to_state: str,
+        metadata: Optional[Dict] = None
     ) -> Optional[EventType]:
-        """상태 전이에서 이벤트 타입 결정"""
+        """상태 전이에서 이벤트 타입 결정. metadata.estop이 True면 비상정지(PROCESS_ABORT)."""
+        meta = metadata or {}
         
         # 공정 시작 (idle/starting → running)
         if from_state in ("idle", "starting") and to_state == "running":
             return EventType.PROCESS_START
         
-        # 공정 정상 종료 (running → stopping → stopped)
+        # 공정 종료: 비상정지(estop)면 PROCESS_ABORT, 아니면 PROCESS_END
         if from_state == "running" and to_state in ("stopping", "stopped"):
-            return EventType.PROCESS_END
+            return EventType.PROCESS_ABORT if meta.get("estop") else EventType.PROCESS_END
         
         if from_state == "stopping" and to_state == "stopped":
-            return EventType.PROCESS_END
+            return EventType.PROCESS_ABORT if meta.get("estop") else EventType.PROCESS_END
         
         # 공정 비정상 중단 (running → error)
         if from_state == "running" and to_state == "error":
@@ -202,7 +205,7 @@ class EventDetector:
         """이벤트 객체 생성"""
         
         level = self.EVENT_LEVELS.get(event_type, EventLevel.INFO)
-        title, message = self._get_event_message(event_type, from_state, to_state, reason)
+        title, message = self._get_event_message(event_type, from_state, to_state, reason, metadata)
         
         return Event(
             event_type=event_type,
@@ -223,22 +226,33 @@ class EventDetector:
         event_type: EventType,
         from_state: str,
         to_state: str,
-        reason: Optional[str]
+        reason: Optional[str],
+        metadata: Optional[Dict] = None
     ) -> tuple:
-        """이벤트 타입별 메시지 생성"""
+        """이벤트 타입별 메시지 생성. metadata.estop이면 비상정지 문구 사용."""
+        meta = metadata or {}
         
+        # 공정명(있으면 메시지에 붙이기)
+        proc = meta.get("process_name")
+        proc_suffix = f"\n공정명: {proc}" if proc else ""
+
         messages = {
             EventType.PROCESS_START: (
                 "▶️ 공정 시작",
-                "DED 공정이 시작되었습니다."
+                "DED 공정이 시작되었습니다." + proc_suffix
             ),
             EventType.PROCESS_END: (
                 "✅ 공정 종료",
-                "DED 공정이 정상적으로 완료되었습니다."
+                "DED 공정이 정상적으로 완료되었습니다." + proc_suffix
             ),
             EventType.PROCESS_ABORT: (
-                "⚠️ 공정 중단",
-                f"DED 공정이 비정상적으로 중단되었습니다.\n원인: {reason or '알 수 없음'}"
+                "🧯 비상정지 (E-STOP)" if meta.get("estop") else "⚠️ 공정 중단",
+                (
+                    "비상정지(E-STOP)로 인해 공정이 종료되었습니다."
+                    + (f"\n사유: {meta.get('estop_reason')}" if meta.get("estop_reason") else "")
+                )
+                if meta.get("estop")
+                else f"DED 공정이 비정상적으로 중단되었습니다.\n원인: {reason or '알 수 없음'}"
             ),
             EventType.EQUIPMENT_ERROR: (
                 "🚨 장비 오류",

@@ -11,12 +11,20 @@ import logging
 import io
 import cv2
 import numpy as np
+import re
 from datetime import datetime
 from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
+from process_state_watcher import ProcessStateWatcher
+
+watcher = ProcessStateWatcher()
 
 # 환경변수 로드 (가장 먼저!)
+# - 프로젝트 루트 .env (backend에서 실행해도 적용)
+# - 현재 디렉터리 .env (override)
 from dotenv import load_dotenv
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_root, ".env"))
 load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File
@@ -51,6 +59,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.sensor_manager import SensorManager
 from backend.data_storage import DataStorage
 from backend.websocket_manager import WebSocketManager
+from backend.measurement_reader import get_measurement_reader
 
 # DED Log Reader 임포트
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "Sensors"))
@@ -80,6 +89,11 @@ class SaveRequest(BaseModel):
     dest_path: Optional[str] = None
 
 
+class ProcessNameRequest(BaseModel):
+    """공정명 설정 요청 모델"""
+    process_name: str
+
+
 # 전역 변수
 sensor_manager: Optional[SensorManager] = None
 data_storage: Optional[DataStorage] = None
@@ -97,6 +111,9 @@ slack_notifier: Optional[SlackNotifier] = None
 
 # DED Trace 파일 감시자 (전역 인스턴스)
 trace_watcher: Optional[DEDTraceWatcher] = None
+
+# 현재 공정명 (프론트엔드 초기 설정 모달에서 전달)
+current_process_name: Optional[str] = None
 
 
 @asynccontextmanager
@@ -137,11 +154,25 @@ async def lifespan(app: FastAPI):
     # 데이터 스토리지 초기화
     logger.info("💾 데이터 스토리지 초기화 중...")
     data_storage = DataStorage()
+    data_storage.bind_sensor_manager(sensor_manager)
+
+    # Measurement CSV 리더 주입 (C:\DED\Measurement와 연동)
+    try:
+        measurement_reader = get_measurement_reader()
+        data_storage.bind_measurement_reader(measurement_reader)
+        logger.info("✅ Measurement 리더 연동 완료 (C:\\DED\\Measurement)")
+    except Exception as e:
+        logger.warning(f"⚠️ Measurement 리더 연동 실패: {e}")
+
     logger.info("✅ 데이터 스토리지 초기화 완료")
     
     # WebSocket 매니저 초기화
     logger.info("🔌 WebSocket 매니저 초기화 중...")
     websocket_manager = WebSocketManager()
+    # ✅ 방어코드: WebSocketManager.active_connections가 None이면 set()으로 초기화
+    if getattr(websocket_manager, 'active_connections', None) is None:
+        websocket_manager.active_connections = set()
+
     logger.info("✅ WebSocket 매니저 초기화 완료")
     
     # DED Log Reader 초기화 (선택적 - Trace/Exception 파일이 없어도 센서는 작동)
@@ -173,11 +204,16 @@ async def lifespan(app: FastAPI):
     # 상태 전이 시 이벤트 감지 → Slack 알림 콜백 등록
     def on_state_transition(transition):
         """상태 전이 시 이벤트 감지 및 Slack 알림"""
+        # 공정명(현재 세션 공정명)을 메타데이터에 포함
+        meta = dict(transition.metadata or {})
+        if current_process_name:
+            meta.setdefault("process_name", current_process_name)
+
         event = event_detector.detect_event(
             from_state=transition.from_state.value,
             to_state=transition.to_state.value,
             reason=transition.reason,
-            metadata=transition.metadata
+            metadata=meta
         )
         
         if event and slack_notifier:
@@ -199,10 +235,37 @@ async def lifespan(app: FastAPI):
         
         if event.event_type == 'process_start':
             # 자동저장 시작
-            session_id = event.metadata.get('session_id', f'auto_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+            # 기본 세션 ID (Trace에서 주거나, 없으면 시간 기반)
+            base_session_id = event.metadata.get('session_id', datetime.now().strftime("%y%m%d_%H%M%S"))
+
+            # 현재 설정된 공정명이 있으면 세션 ID에 공정명 추가 (Windows 금지 문자만 치환)
+            safe_session_id = base_session_id
+            try:
+                if current_process_name:
+                    raw = str(current_process_name).strip()
+                    if raw:
+                        invalid_chars = '\\/:*?"<>|'
+                        table = str.maketrans({ch: "_" for ch in invalid_chars})
+                        safe_name = raw.translate(table)
+                        safe_session_id = f"{base_session_id}_{safe_name}"
+            except Exception as e:
+                logger.warning(f"⚠️ 공정명 기반 세션 ID 생성 실패, 기본값 사용: {e}")
+
+            session_id = safe_session_id
             try:
                 await data_storage.start_temp_storage(session_id)
                 logger.info(f"🚀 자동저장 시작: {session_id}")
+
+                # Basler 이미지 저장: 1초마다 session_id/image 폴더에 저장
+                img_dir = os.path.join(data_storage.base_db_path, session_id, "image")
+                os.makedirs(img_dir, exist_ok=True)
+                if sensor_manager and "camera" in getattr(sensor_manager, "collectors", {}):
+                    sensor_manager.collectors["camera"].set_save_dir(img_dir)
+                    logger.info(f"📷 Basler 이미지 저장 시작(자동, 1초/장): {img_dir}")
+
+                # CSV 실시간 기록 경로 (다른 프로그램에서 모니터링 CSV 실시간 확인 가능)
+                data_storage.temp_csv_path = os.path.join(data_storage.base_db_path, session_id, f"{session_id}.csv")
+                logger.info(f"📄 CSV 실시간 기록: {data_storage.temp_csv_path}")
                 
                 # 상태 전이: IDLE → RUNNING
                 if machine_state_manager:
@@ -231,6 +294,11 @@ async def lifespan(app: FastAPI):
         elif event.event_type in ['process_end', 'system_shutdown']:
             # 자동저장 종료 및 DB에 자동 저장
             try:
+                # Basler 이미지 저장 중지 (자동저장용 set_save_dir 해제)
+                if sensor_manager and "camera" in getattr(sensor_manager, "collectors", {}):
+                    sensor_manager.collectors["camera"].stop_saving()
+                    logger.info("📷 Basler 이미지 저장 중지(자동)")
+
                 save_path = None
                 session_id = data_storage.temp_storage_session_id
                 data_count = len(data_storage.temp_storage)
@@ -243,19 +311,27 @@ async def lifespan(app: FastAPI):
                     await data_storage.stop_temp_storage()
                     logger.info(f"🛑 자동저장 중지 (저장할 데이터 없음): {event.event_type}")
                 
-                # 상태 전이: RUNNING → STOPPED → IDLE
+                # 비상정지: 1) CNC/watcher 2) Trace 내 비상 키워드
+                estop_w, estop_reason_w = watcher.get_estop_status()
+                estop = bool(estop_w or event.metadata.get("estop", False))
+                estop_reason = (estop_reason_w or "") or str(event.metadata.get("estop_reason", ""))
+                stop_meta = {"estop": estop, "estop_reason": estop_reason or ""}
+                # 상태 전이: RUNNING → STOPPING → STOPPED → IDLE (estop이면 Slack에 비상종료로 알림)
                 if machine_state_manager:
                     machine_state_manager.transition_to(
                         MachineState.STOPPING,
-                        reason=f"Trace 파일에서 {event.event_type} 감지"
+                        reason=f"Trace 파일에서 {event.event_type} 감지",
+                        metadata=stop_meta
                     )
                     machine_state_manager.transition_to(
                         MachineState.STOPPED,
-                        reason="공정 종료됨"
+                        reason="공정 종료됨",
+                        metadata=stop_meta
                     )
                     machine_state_manager.transition_to(
                         MachineState.IDLE,
-                        reason="대기 상태로 복귀"
+                        reason="대기 상태로 복귀",
+                        metadata=stop_meta
                     )
                 
                 # WebSocket으로 프론트엔드에 알림 (저장 경로 포함)
@@ -371,12 +447,71 @@ async def collect_sensor_data():
                 # 모든 센서 데이터 수집 (이미 Thread로 수집 중이므로 DB에서만 조회)
                 sensor_data = await sensor_manager.collect_all_data()
                 
+                # ✅ [Slack 알림] 상태 계산 + 변화 감지 (여기 추가)
+                cnc = sensor_data.get("cnc_data") or sensor_data.get("cnc") or {}
+                laser = sensor_data.get("laser_data") or sensor_data.get("laser") or {}
+
+                # running 판단(가능한 신호부터 순서대로)
+                status = str(cnc.get("status") or cnc.get("machine_state") or cnc.get("state") or "").upper()
+                running = False
+
+                if status in ["RUN", "RUNNING", "AUTO", "CYCLE", "CYCLESTART"]:
+                    running = True
+                elif isinstance(cnc.get("program_running"), bool):
+                    running = cnc["program_running"]
+                else:
+                    # 마지막 보험: 레이저 파워가 일정 이상이면 공정 중으로 간주
+                    power = laser.get("power") or laser.get("laser_power") or 0
+                    try:
+                        running = float(power) > 10.0
+                    except Exception:
+                        running = False
+
+                # estop 판단
+                alarm = str(cnc.get("alarm") or cnc.get("alarm_code") or cnc.get("alarm_state") or "").upper()
+                estop = False
+                if status in ["ESTOP", "E-STOP", "EMERGENCY", "EMERGENCY_STOP", "ALARM"]:
+                    estop = True
+                elif cnc.get("estop") is not None:
+                    estop = bool(cnc["estop"])  # CNC 센서 HxGetSystemEmg 등
+                elif isinstance(cnc.get("emergency_stop"), bool):
+                    estop = cnc["emergency_stop"]
+                elif "ESTOP" in alarm or "E-STOP" in alarm or "EMERGENCY" in alarm:
+                    estop = True
+
+                reason = alarm or status
+
+                prev_running = watcher.prev_running
+                watcher.update(running=running, estop=estop, estop_reason=reason)
+
+                # CNC에서 running True→False 감지 시 상태 전이 (비상정지면 metadata.estop으로 Slack에 비상종료 알림)
+                if (
+                    prev_running is True and running is False
+                    and machine_state_manager
+                    and machine_state_manager.current_state in (MachineState.RUNNING, MachineState.STARTING)
+                ):
+                    estop_meta = {"estop": estop, "estop_reason": reason or ""}
+                    machine_state_manager.transition_to(
+                        MachineState.STOPPING, reason="공정 종료 (CNC 신호)", metadata=estop_meta
+                    )
+                    machine_state_manager.transition_to(
+                        MachineState.STOPPED, reason="공정 종료됨", metadata=estop_meta
+                    )
+                    machine_state_manager.transition_to(
+                        MachineState.IDLE, reason="대기 상태로 복귀", metadata=estop_meta
+                    )
+                
                 # 데이터 저장소에 저장
                 data_storage.store_data(sensor_data)
-                
-                # WebSocket으로 실시간 전송
-                if websocket_manager:
-                    await websocket_manager.broadcast_data(sensor_data)
+
+                # ✅ WebSocket: 정규화된 latest만 전송 (nested sensor_data 제거 → 직렬화/용량 오류 원인 제거)
+                if websocket_manager and data_storage:
+                    try:
+                        latest = data_storage.get_latest_data()
+                        if latest:
+                            await websocket_manager.broadcast_data(latest)
+                    except Exception as e:
+                        logger.warning(f"WebSocket broadcast 실패(무시하고 계속 수집): {type(e).__name__}: {e}")
                 
                 collection_count += 1
                 
@@ -505,11 +640,11 @@ async def start_saving(request: SaveRequest):
             save_path = await data_storage.start_saving(request.folder_name)
             logger.info(f"✅ 데이터 저장 시작됨: {save_path}")
             
-            # Basler 카메라 이미지 저장 시작 (공정 폴더 안에 basler_images 폴더)
-            if sensor_manager and "camera" in sensor_manager.collectors:
+            # Basler 카메라 이미지 저장 시작 (1초에 1장, 공정 폴더/image)
+            if sensor_manager and "camera" in getattr(sensor_manager, "collectors", {}):
                 basler_save_dir = os.path.join(save_path, "image")
                 sensor_manager.collectors["camera"].set_save_dir(basler_save_dir)
-                logger.info(f"📷 Basler 이미지 저장 시작: {basler_save_dir}")
+                logger.info(f"📷 Basler 이미지 저장 시작 (1초/장): {basler_save_dir}")
             
             return {
                 "message": "데이터 저장이 시작되었습니다",
@@ -520,6 +655,24 @@ async def start_saving(request: SaveRequest):
     except Exception as e:
         logger.error(f"❌ 저장 시작 실패: {e}")
         raise HTTPException(status_code=500, detail=f"저장 시작 실패: {str(e)}")
+
+
+@app.post("/api/process/name")
+async def set_process_name(req: ProcessNameRequest):
+    """프론트엔드 초기 설정 모달에서 공정명을 설정하는 엔드포인트
+
+    - 공정명은 자동저장 세션 ID에 포함되어 DB 폴더가 `YYMMDD_HHMMSS_공정명` 형식으로 생성되도록 사용된다.
+    """
+    global current_process_name
+
+    name = (req.process_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="공정명이 비어 있습니다.")
+
+    current_process_name = name
+    logger.info(f"✅ 공정명 설정됨: {current_process_name}")
+
+    return {"message": "공정명이 설정되었습니다", "process_name": current_process_name}
 
 
 @app.post("/api/save/stop")
@@ -551,7 +704,7 @@ async def stop_saving():
             )
         
         # Basler 카메라 이미지 저장 중지
-        if sensor_manager and "camera" in sensor_manager.collectors:
+        if sensor_manager and "camera" in getattr(sensor_manager, "collectors", {}):
             sensor_manager.collectors["camera"].stop_saving()
             logger.info("📷 Basler 이미지 저장 중지")
         
@@ -679,6 +832,9 @@ async def get_image(image_type: str):
 
 
 def generate_mjpeg_frames(image_type: str):
+    # 별칭 처리
+    if image_type in ["ccd", "ccd_camera"]:
+        image_type = "hik"
     """MJPEG 스트리밍용 프레임 제너레이터 (실시간 영상 스트리밍)"""
     global sensor_manager
     
@@ -776,9 +932,13 @@ async def stream_video(image_type: str):
     if sensor_manager is None:
         raise HTTPException(status_code=503, detail="센서 매니저가 초기화되지 않았습니다")
     
-    if image_type not in ["basler", "hik"]:
+    if image_type not in ["basler", "hik", "ccd", "ccd_camera"]:
         raise HTTPException(status_code=400, detail=f"알 수 없는 이미지 타입: {image_type}")
     
+    # 타입 별칭 처리 (프론트에서 ccd로 요청하는 경우 hik 스트림으로 매핑)
+    if image_type in ["ccd", "ccd_camera"]:
+        image_type = "hik"
+
     # 카메라 연결 상태 확인
     if image_type == "basler" and not sensor_manager.connection_status.get("camera"):
         raise HTTPException(status_code=404, detail="Basler 카메라가 연결되지 않았습니다")
@@ -1414,6 +1574,9 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info(f"🔌 WebSocket 연결 요청: {client_host}")
     
     try:
+        # ✅ 방어코드: active_connections None 방지
+        if getattr(websocket_manager, 'active_connections', None) is None:
+            websocket_manager.active_connections = set()
         await websocket_manager.connect(websocket)
         print(f"✅ WebSocket 연결됨: {client_host} (총 {len(websocket_manager.active_connections)}개 연결)")
         logger.info(f"✅ WebSocket 연결됨: {client_host} (총 {len(websocket_manager.active_connections)}개 연결)")
@@ -1443,9 +1606,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 raise
                 
     except WebSocketDisconnect:
+        # ✅ 방어코드: active_connections None 방지
+        if getattr(websocket_manager, 'active_connections', None) is None:
+            websocket_manager.active_connections = set()
         websocket_manager.disconnect(websocket)
         print(f"🔌 WebSocket 연결 해제: {client_host}")
         logger.info(f"🔌 WebSocket 연결 해제: {client_host}")
+        # ✅ 방어코드: active_connections None 방지
+        if getattr(websocket_manager, 'active_connections', None) is None:
+            websocket_manager.active_connections = set()
     except Exception as e:
         print(f"❌ WebSocket 에러: {str(e)}")
         logger.error(f"❌ WebSocket 에러: {client_host}", exc_info=True)

@@ -5,8 +5,6 @@ interface SensorStatus {
   camera: boolean;
   pyrometer: boolean;
   laser: boolean;
-  hik_camera_1: boolean;
-  hik_camera_2: boolean;
   cnc: boolean;
 }
 
@@ -18,16 +16,13 @@ export default function ConnectionStatus() {
     camera: false,
     pyrometer: false,
     laser: false,
-    hik_camera_1: false,
-    hik_camera_2: false,
     cnc: false,
   };
 
-
   const sensors = [
     { key: 'camera', label: 'Basler Camera' },
-    { key: 'hik_camera_1', label: 'HikRobot-1' },
-    { key: 'hik_camera_2', label: 'HikRobot-2' },
+    // { key: 'hik_camera_1', label: 'HikRobot-1' }, // Hik 카메라 UI 비활성화
+    // { key: 'hik_camera_2', label: 'HikRobot-2' }, // Hik 카메라 UI 비활성화
     { key: 'pyrometer', label: '2color Pyrometer' },
     { key: 'laser', label: 'Laser' },
     { key: 'cnc', label: 'CNC' },
@@ -56,6 +51,7 @@ export default function ConnectionStatus() {
         </div>
       </div>
       
+      {/* 센서 연결 상태 그리드 */}
       <div className="bg-gray-50 p-3 rounded-lg">
         <div className="grid grid-cols-2 gap-1">
           {sensors.map(({ key, label }) => {
@@ -69,7 +65,7 @@ export default function ConnectionStatus() {
           })}
         </div>
       </div>
-      
+
       {/* 시스템 상태 정보 */}
       {systemStatus && (
         <div className="mt-3 p-2 rounded-lg bg-green-50">

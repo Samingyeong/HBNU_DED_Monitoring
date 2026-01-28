@@ -7,6 +7,7 @@ import threading
 from queue import Queue, Empty
 import os
 
+
 class CameraCommunication:
     def __init__(self):
         connected = False
@@ -14,6 +15,7 @@ class CameraCommunication:
             try:
                 self.camera = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
                 self.camera.Open()
+                # 기존 고정 설정으로 카메라 초기화 (720x520, expos=400)
                 self.cam_setting()
                 print("Basler Camera Connected!")
                 connected = True
@@ -34,6 +36,7 @@ class CameraCommunication:
 
         self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
+        # 기존 FOV 기준으로 픽셀 면적(mm^2/pixel) 계산 (720x520 고정)
         fov_w, fov_h = 5.13, 4.10  # mm
         width, height = 720, 520
         self.pixel_size = (fov_w * fov_h) / (width * height)
@@ -107,12 +110,13 @@ class CameraCollector(threading.Thread):
         self._lock = threading.Lock()
 
     def set_save_dir(self, save_dir: str):
-        """이미지 저장 경로 설정 (공정 시작 시 호출)"""
+        """이미지 저장 경로 설정 (공정 시작 시 호출). 1초에 1장 저장."""
         with self._lock:
             self.save_dir = save_dir
             if save_dir:
                 os.makedirs(save_dir, exist_ok=True)
-                print(f"[Basler] 이미지 저장 경로 설정: {save_dir}")
+                self.last_save = 0  # 첫 프레임에서 곧바로 1장 저장 후 1초 간격
+                print(f"[Basler] 이미지 저장 경로 설정 (1초/장): {save_dir}")
     
     def stop_saving(self):
         """이미지 저장 중지 (공정 종료 시 호출)"""
@@ -147,8 +151,18 @@ class CameraCollector(threading.Thread):
                     if now - self.last_save >= self.save_interval:
                         timestamp = time.strftime("%Y%m%d_%H%M%S")
                         filename = os.path.join(current_save_dir, f"basler_{timestamp}.png")
-                        cv2.imwrite(filename, frame)
-                        print(f"[Basler SAVE] {filename}")
+                        try:
+                            # ⚠️ OpenCV가 한글/비ASCII 경로에서 imwrite 실패하는 이슈가 있어
+                            #     imencode + Python 파일 I/O로 직접 저장한다.
+                            ok, buf = cv2.imencode(".png", frame)
+                            if ok:
+                                with open(filename, "wb") as f:
+                                    f.write(buf.tobytes())
+                                print(f"[Basler SAVE] {filename}")
+                            else:
+                                print(f"[Basler SAVE ERROR] 이미지 인코딩 실패: {filename}")
+                        except Exception as e:
+                            print(f"[Basler SAVE ERROR] 파일 저장 실패: {filename}, 오류: {e}")
                         self.last_save = now
             else:
                 error_count += 1

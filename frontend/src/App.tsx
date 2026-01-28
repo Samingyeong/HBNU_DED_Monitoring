@@ -7,13 +7,13 @@ import Charts from './components/Charts';
 import EmergencyModal from './components/EmergencyModal';
 import InitialSetupModal from './components/InitialSetupModal';
 import ToolPath from './components/ToolPath';
+import { ApiService } from './services/api';
 
 function App() {
   const [emergency, setEmergency] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [showInitialSetup, setShowInitialSetup] = useState(true);
-  const [operatorName, setOperatorName] = useState('');
-  
+  const [processName, setProcessName] = useState('');
   const [folderName, setFolderName] = useState('');
 
   const handleEmergencyToggle = (newEmergency: boolean) => {
@@ -36,24 +36,32 @@ function App() {
     setShowEmergencyModal(false);
   };
 
-  const handleInitialSetupComplete = (operator: string) => {
-    setOperatorName(operator);
+  const handleInitialSetupComplete = async (process: string) => {
+    setProcessName(process);
     
-    // 폴더명 자동 생성: YYYYMMDD_HHMM_작업자명
+    // 폴더명 자동 생성: YYMMDD_HHMMSS_공정명
     const now = new Date();
-    const year = now.getFullYear();
+    const year = String(now.getFullYear()).slice(2);
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
     const hour = String(now.getHours()).padStart(2, '0');
     const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
     
-    const generatedFolderName = `${year}${month}${day}_${hour}${minute}_${operator}`;
+    const generatedFolderName = `${year}${month}${day}_${hour}${minute}${second}_${process}`;
     setFolderName(generatedFolderName);
+
+    // 백엔드에 공정명 전달 (자동저장 세션 ID에 반영되도록)
+    try {
+      await ApiService.setProcessName({ process_name: process });
+    } catch (e) {
+      console.error('공정명 설정 API 호출 실패:', e);
+    }
     
     setShowInitialSetup(false);
     
     console.log('설정 완료:', {
-      operatorName: operator,
+      processName: process,
       folderName: generatedFolderName
     });
   };
@@ -80,15 +88,16 @@ function App() {
         <div className="flex-1 flex flex-col xl:flex-row gap-2">
           {/* 1열 - 카메라 + 툴패스 (세로 배치) */}
           <div className="w-full xl:w-[380px] flex flex-col gap-2">
-            {/* 바슬러 카메라 (직사각형 - 이미지 중심) */}
-            <div className="h-[200px]">
+            {/* 바슬러 카메라 (카드 아웃라인을 내부 영상 높이에 맞게 확대) */}
+            <div className="h-[380px]">
               <CameraView cameraType="basler" />
             </div>
             
-            {/* 하이크로봇 카메라 */}
+            {/* 하이크로봇 카메라 (장비 SW와 카메라 자원 충돌 때문에 임시 비활성화)
             <div className="h-[200px]">
               <CameraView cameraType="hikrobot" />
             </div>
+            */}
             
             {/* 툴패스 (정사각형) */}
             <div className="flex-1 min-h-[300px]">
@@ -124,12 +133,16 @@ function App() {
         </div>
       </div>
       
-      {/* Bottom Bar */}
-      <div className="h-8 bg-white border-t border-gray-200 flex items-center justify-between px-4 w-[98%] rounded-xl shadow-sm">
-        <div className="text-xs text-gray-500">
-          Copyright by KITECH V2.0
-        </div>
-        <div className="flex space-x-2">
+      {/* Bottom Bar (정보만 표시) */}
+      <div className="bg-white border-t border-gray-200 flex items-center justify-between px-4 py-2 w-[98%] rounded-xl shadow-sm">
+        {/* 좌측: 여백 또는 간단한 설명 자리 (현재 비워둠) */}
+        <div />
+
+        {/* 우측: 정보 */}
+        <div className="flex flex-col items-end space-y-1 text-xs text-gray-500">
+          <div className="text-xs text-gray-500">
+            Copyright by KITECH V2.0
+          </div>
           <div className="text-xs text-gray-500">
             React + Electron + FastAPI
           </div>

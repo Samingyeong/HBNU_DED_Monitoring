@@ -7,6 +7,63 @@ import asyncio
 from typing import List, Dict, Any
 from fastapi import WebSocket
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+
+def _json_default(obj):
+    """JSON 직렬화 불가 타입 처리: numpy·ndarray·bytes·datetime 등."""
+    if np is not None:
+        if isinstance(obj, np.ndarray):
+            return None
+        if isinstance(obj, (np.integer, np.int64, np.int32, np.uint8, np.uint16, np.uint32)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return None
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    try:
+        return str(obj)
+    except Exception:
+        return None
+
+
+def _sanitize_for_json(obj, _depth=0):
+    """재귀적으로 payload 정제: ndarray·bytes·numpy 스칼라 제거/변환. 순환·과심도 방지."""
+    if _depth > 50:
+        return None
+    if obj is None or obj is True or obj is False:
+        return obj
+    if isinstance(obj, (int, float, str)):
+        return obj
+    if np is not None:
+        if isinstance(obj, np.ndarray):
+            return None
+        if isinstance(obj, (np.integer, np.int64, np.int32, np.uint8, np.uint16, np.uint32)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return None
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v, _depth + 1) for v in obj]
+    try:
+        return str(obj)
+    except Exception:
+        return None
+
 
 class WebSocketManager:
     """WebSocket 연결 관리 및 실시간 데이터 브로드캐스트"""
@@ -49,35 +106,36 @@ class WebSocketManager:
         """모든 연결된 클라이언트에게 센서 데이터 브로드캐스트"""
         if not self.active_connections:
             return
-        
+
         try:
-            # 센서 데이터를 WebSocket 메시지 형태로 변환
+            # 재귀 정제: ndarray·bytes·numpy 스칼라 제거. 실패 시 원본으로 직렬화 시도.
+            try:
+                data_clean = _sanitize_for_json(sensor_data)
+            except Exception as e:
+                print(f"⚠️ _sanitize_for_json 오류: {type(e).__name__}: {e}")
+                data_clean = sensor_data
             message = {
                 "type": "sensor_data",
-                "data": sensor_data,
+                "data": data_clean,
                 "timestamp": self._get_timestamp(),
                 "connection_count": self.connection_count
             }
-            
-            # JSON 직렬화
-            message_json = json.dumps(message, ensure_ascii=False, default=str)
-            
-            # 모든 연결된 클라이언트에게 전송
+            message_json = json.dumps(message, ensure_ascii=False, default=_json_default)
+
             disconnected_connections = []
-            
-            for connection in self.active_connections:
+            # 스냅샷으로 순회 (순회 중 disconnect로 리스트 변경 시 RuntimeError 방지)
+            for connection in list(self.active_connections):
                 try:
                     await connection.send_text(message_json)
                 except Exception as e:
-                    print(f"⚠️ 브로드캐스트 전송 오류: {e}")
+                    print(f"⚠️ 브로드캐스트 전송 오류: {type(e).__name__}: {e}")
                     disconnected_connections.append(connection)
-            
-            # 연결이 끊어진 클라이언트 제거
+
             for connection in disconnected_connections:
                 self.disconnect(connection)
-                
+
         except Exception as e:
-            print(f"❌ 브로드캐스트 오류: {e}")
+            print(f"❌ 브로드캐스트 오류: {type(e).__name__}: {e}")
     
     async def broadcast_status(self, status_data: Dict[str, Any]):
         """시스템 상태 정보 브로드캐스트"""
@@ -91,7 +149,7 @@ class WebSocketManager:
                 "timestamp": self._get_timestamp()
             }
             
-            message_json = json.dumps(message, ensure_ascii=False, default=str)
+            message_json = json.dumps(message, ensure_ascii=False, default=_json_default)
             
             disconnected_connections = []
             
@@ -120,7 +178,7 @@ class WebSocketManager:
                 "timestamp": self._get_timestamp()
             }
             
-            message_json = json.dumps(message, ensure_ascii=False, default=str)
+            message_json = json.dumps(message, ensure_ascii=False, default=_json_default)
             
             disconnected_connections = []
             

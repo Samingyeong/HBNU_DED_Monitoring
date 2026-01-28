@@ -6,6 +6,7 @@ import axios from 'axios';
 import { useAutoSave } from '../hooks/useAutoSave';
 import { useSensorData } from '../hooks/useSensorData';
 import ConfigViewerModal from './ConfigViewerModal';
+import { ApiService } from '../services/api';
 
 interface HeaderProps {
   emergency: boolean;
@@ -20,6 +21,11 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  // 시간 줄 및 모달에서 사용할 공정명/작업자
+  const [processNameInput, setProcessNameInput] = useState('');
+  const [operatorNameInput, setOperatorNameInput] = useState('');
+  const [currentProcessLabel, setCurrentProcessLabel] = useState<string | null>(null);
+  const [isProcessSaving, setIsProcessSaving] = useState(false);
   
   // 실제 센서 데이터
   const { 
@@ -137,6 +143,35 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
     onEmergencyToggle(!emergency);
   };
 
+  // 상단 시간 줄/모달에서 공정명/작업자 적용
+  const handleProcessNameApply = async () => {
+    const proc = processNameInput.trim();
+    const oper = operatorNameInput.trim();
+
+    if (!proc) {
+      alert('공정명을 입력해주세요.');
+      return;
+    }
+    if (!oper) {
+      alert('작업자 이름을 입력해주세요.');
+      return;
+    }
+
+    const combined = `${proc}_${oper}`;
+
+    try {
+      setIsProcessSaving(true);
+      await ApiService.setProcessName({ process_name: combined });
+      setCurrentProcessLabel(combined);
+      console.log('✅ 공정명/이름 설정:', combined);
+    } catch (e: any) {
+      console.error('공정명 설정 실패:', e);
+      alert('공정명을 설정하는 중 오류가 발생했습니다. 콘솔 로그를 확인해주세요.');
+    } finally {
+      setIsProcessSaving(false);
+    }
+  };
+
   return (
     <div className="w-full bg-white shadow-lg rounded-2xl p-4 mb-4">
       <div className="flex items-center justify-between">
@@ -153,24 +188,62 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
 
         {/* 오른쪽: 시간 및 컨트롤 버튼들 */}
         <div className="flex items-center space-x-4">
-          {/* 현재 시간 */}
-          <div className="text-base font-medium text-gray-600">
-            {currentTime.toLocaleDateString('ko-KR', { 
-              year: 'numeric', 
-              month: '2-digit', 
-              day: '2-digit' 
-            })} {currentTime.toLocaleTimeString('ko-KR', { 
-              hour12: true, 
-              hour: 'numeric', 
-              minute: '2-digit', 
-              second: '2-digit' 
-            })}
+          {/* 현재 시간 + 공정명/작업자 (한 줄) */}
+          <div className="flex flex-col items-end space-y-1">
+            <div className="flex items-center space-x-3">
+              <div className="text-base font-medium text-gray-600">
+                {currentTime.toLocaleDateString('ko-KR', { 
+                  year: 'numeric', 
+                  month: '2-digit', 
+                  day: '2-digit' 
+                })} {currentTime.toLocaleTimeString('ko-KR', { 
+                  hour12: true, 
+                  hour: 'numeric', 
+                  minute: '2-digit', 
+                  second: '2-digit' 
+                })}
+              </div>
+              <div className="flex items-center space-x-3 text-sm text-gray-700">
+                <span className="font-medium">공정명</span>
+                <input
+                  type="text"
+                  value={processNameInput}
+                  onChange={(e) => setProcessNameInput(e.target.value)}
+                  placeholder="예: 공정A"
+                  className="px-3 py-2 border rounded-lg w-40"
+                />
+                <span className="font-medium">작업자명</span>
+                <input
+                  type="text"
+                  value={operatorNameInput}
+                  onChange={(e) => setOperatorNameInput(e.target.value)}
+                  placeholder="예: 홍길동"
+                  className="px-3 py-2 border rounded-lg w-32"
+                />
+                <button
+                  onClick={handleProcessNameApply}
+                  disabled={isProcessSaving}
+                  className={`px-3 py-2 text-xs rounded-lg border ${
+                    isProcessSaving
+                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                      : 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100'
+                  }`}
+                >
+                  {isProcessSaving ? '저장중' : '적용'}
+                </button>
+              </div>
+            </div>
+            {currentProcessLabel && (
+              <div className="text-[11px] text-gray-500">
+                현재 공정: <span className="font-medium">{currentProcessLabel}</span>
+              </div>
+            )}
           </div>
           
-          {/* 폴더명 표시 (수정 불가) */}
-          {folderName && (
+          {/* 폴더명 / 현재 공정 표시 (파란 박스) */}
+          {(currentProcessLabel || folderName) && (
             <div className="px-3 py-2 text-sm bg-blue-50 border border-blue-300 rounded-lg text-blue-700 font-medium">
-              {folderName}
+              {currentProcessLabel || folderName}
             </div>
           )}
 
@@ -298,6 +371,51 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
               </button>
             </div>
             
+            {/* 공정명 / 작업자명 설정 (연결 상태 모달 상단) */}
+            <div className="mb-4 p-3 rounded-lg bg-gray-50">
+              <div className="text-xs font-semibold text-gray-700 mb-2">
+                공정명 / 작업자 설정
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center space-x-2">
+                  <span className="w-14 text-gray-700">공정명</span>
+                  <input
+                    type="text"
+                    value={processNameInput}
+                    onChange={(e) => setProcessNameInput(e.target.value)}
+                    placeholder="예: 공정A"
+                    className="flex-1 px-2 py-1 border rounded-lg"
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="w-14 text-gray-700">작업자</span>
+                  <input
+                    type="text"
+                    value={operatorNameInput}
+                    onChange={(e) => setOperatorNameInput(e.target.value)}
+                    placeholder="예: 홍길동"
+                    className="flex-1 px-2 py-1 border rounded-lg"
+                  />
+                  <button
+                    onClick={handleProcessNameApply}
+                    disabled={isProcessSaving}
+                    className={`px-3 py-1 rounded-lg border ${
+                      isProcessSaving
+                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                        : 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100'
+                    }`}
+                  >
+                    {isProcessSaving ? '저장중' : '적용'}
+                  </button>
+                </div>
+                {currentProcessLabel && (
+                  <div className="text-[11px] text-gray-700 mt-1">
+                    현재 공정: <span className="font-medium">{currentProcessLabel}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
             {/* 백엔드 연결 상태 */}
             <div className="mb-4 p-3 bg-blue-50 rounded">
               <h3 className="font-semibold mb-2">백엔드 연결</h3>
@@ -321,10 +439,12 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
               {systemStatus?.sensors ? (
                 <div className="space-y-2">
                   {Object.entries(systemStatus.sensors).map(([key, status]) => {
+                    // Hik 카메라는 UI에서 숨김
+                    if (key === 'hik_camera_1' || key === 'hik_camera_2') {
+                      return null;
+                    }
                     const labels: { [key: string]: string } = {
                       camera: 'Basler Camera',
-                      hik_camera_1: 'HikRobot-1',
-                      hik_camera_2: 'HikRobot-2',
                       pyrometer: '2color Pyrometer',
                       laser: 'Laser',
                       cnc: 'CNC'

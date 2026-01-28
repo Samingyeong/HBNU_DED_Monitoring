@@ -20,31 +20,34 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
         timestamp: data.timestamp
       };
 
+      // 정규화(flat) 우선: mpt, 1ct, melt_pool_area, outpower, setpower, ccd_height_avg_mm
+      const d = data as Record<string, unknown>;
       switch (chartType) {
         case 'meltpoolTemp':
           return {
             ...baseData,
-            meltPoolTemp: data.pyrometer_data?.mpt || 0,
-            oneColorTemp: data.pyrometer_data?.['1ct'] || 0,
+            meltPoolTemp: d.mpt ?? (data as any).pyrometer_data?.mpt ?? 0,
+            oneColorTemp: d['1ct'] ?? (data as any).pyrometer_data?.['1ct'] ?? 0,
           };
-        
+
         case 'meltpoolArea':
           return {
             ...baseData,
-            meltPoolArea: data.camera_data?.melt_pool_area || 0,
+            meltPoolArea: d.melt_pool_area ?? (data as any).camera_data?.melt_pool_area ?? 0,
           };
-        
+
         case 'laserPower':
           return {
             ...baseData,
-            outputPower: data.laser_data?.outpower || 0,
-            setPower: data.laser_data?.setpower || 0,
+            outputPower: d.outpower ?? (data as any).laser_data?.outpower ?? 0,
+            setPower: d.setpower ?? (data as any).laser_data?.setpower ?? 0,
           };
-        
+
         case 'height':
           return {
             ...baseData,
-            height: (data.camera_data as any)?.height || 0,
+            // ✅ CCD 높이 대신 Measurement CSV의 Height(mm) 사용
+            height: (data as any).height_mm ?? 0,
           };
         
         default:
@@ -63,7 +66,9 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
             { dataKey: 'meltPoolTemp', name: 'Melt Pool Temp', color: '#ef4444', stroke: '#ef4444' },
             { dataKey: 'oneColorTemp', name: '1-Color Temp', color: '#22c55e', stroke: '#22c55e', strokeDasharray: '5 5' }
           ],
-          yAxisDomain: [600, 2500]
+          // Y축 범위를 500 ~ 2000°C로 고정
+          yAxisDomain: [500, 2000],
+          yAxisTicks: undefined
         };
       
       case 'meltpoolArea':
@@ -73,7 +78,8 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
           lines: [
             { dataKey: 'meltPoolArea', name: 'Melt Pool Area', color: '#3b82f6', stroke: '#3b82f6' }
           ],
-          yAxisDomain: [-0.5, 5]
+          yAxisDomain: [-0.5, 5],
+          yAxisTicks: undefined
         };
       
       case 'laserPower':
@@ -84,17 +90,20 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
             { dataKey: 'outputPower', name: 'Output Power', color: '#f97316', stroke: '#f97316' },
             { dataKey: 'setPower', name: 'Set Power', color: '#f97316', stroke: '#f97316', strokeDasharray: '5 5' }
           ],
-          yAxisDomain: [0, 1200]
+          // Y축 범위를 0 ~ 1000W로 고정
+          yAxisDomain: [0, 1000],
+          yAxisTicks: undefined
         };
       
       case 'height':
         return {
-          title: 'Height (CCD)',
+          title: 'Height (Measurement CSV)',
           yAxisLabel: 'Height (mm)',
           lines: [
-            { dataKey: 'height', name: 'Height', color: '#8b5cf6', stroke: '#8b5cf6' }
+            { dataKey: 'height', name: 'Melt Pool Height', color: '#8b5cf6', stroke: '#8b5cf6' }
           ],
-          yAxisDomain: [-10, 10]
+          yAxisDomain: [-1, 2],
+          yAxisTicks: [-1, 0, 1, 2]
         };
       
       default:
@@ -102,7 +111,8 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
           title: 'Unknown Chart',
           yAxisLabel: 'Value',
           lines: [],
-          yAxisDomain: [0, 100]
+          yAxisDomain: [0, 100],
+          yAxisTicks: undefined
         };
     }
   };
@@ -162,6 +172,7 @@ const Charts: React.FC<ChartsProps> = ({ chartType }) => {
                 />
                 <YAxis 
                   domain={config.yAxisDomain}
+                  {...(config.yAxisTicks && { ticks: config.yAxisTicks })}
                   stroke="#6b7280"
                   fontSize={12}
                   tick={{ fontSize: 10 }}

@@ -82,10 +82,10 @@ const StreamDisplay = React.memo(({
         </div>
       </div>
 
-      {/* 비디오 영역 - 고정 높이로 레이아웃 안정화 */}
+      {/* 비디오 영역 - 고정 높이를 살짝 키워서 레이아웃 안정화 */}
       <div 
         className="flex-1 bg-gray-900 rounded-lg overflow-hidden relative"
-        style={{ minHeight: '280px', maxHeight: '400px' }}
+        style={{ minHeight: '320px', maxHeight: '460px' }}
       >
         {/* 항상 img 태그 렌더링 (visibility로 제어) */}
         <img
