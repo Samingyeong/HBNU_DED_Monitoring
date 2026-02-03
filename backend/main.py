@@ -109,6 +109,28 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 HBNU DED 모니터링 백엔드 서버 시작 중...")
     logger.info("=" * 80)
     
+    # 환경/경로 점검 (클론 후 설정 누락 시 안내)
+    _backend_dir = os.path.dirname(os.path.abspath(__file__))
+    _project_root = os.path.dirname(_backend_dir)
+    _config_dir = os.path.join(_project_root, "config")
+    _sensors_dir = os.path.join(_project_root, "Sensors")
+    _hxapi_dll_dir = os.path.join(_sensors_dir, "HXApi", "dll")
+    _required_configs = ["HXApi.ini", "IPG.ini", "Pyrometer.ini"]
+    if os.path.isdir(_config_dir):
+        logger.info(f"📁 Config 경로: {_config_dir}")
+        for name in _required_configs:
+            path = os.path.join(_config_dir, name)
+            if os.path.isfile(path):
+                logger.info(f"   ✅ {name}")
+            else:
+                logger.warning(f"   ❌ {name} 없음 (센서 연결 실패 가능) → trouble_shooting_md/SETUP_AFTER_CLONE.md 참고")
+    else:
+        logger.warning(f"📁 Config 폴더 없음: {_config_dir} → trouble_shooting_md/SETUP_AFTER_CLONE.md 참고")
+    if os.path.isdir(_hxapi_dll_dir) and os.path.isfile(os.path.join(_hxapi_dll_dir, "HXApi.dll")):
+        logger.info(f"📁 HXApi DLL 경로: {_hxapi_dll_dir}")
+    else:
+        logger.warning(f"📁 HXApi DLL 폴더/파일 없음: {_hxapi_dll_dir} → CNC 연결 불가, SETUP_AFTER_CLONE.md 참고")
+    
     # CNC Subprocess 모드 설정 (환경 변수 또는 기본값)
     use_cnc_subprocess = os.getenv('USE_CNC_SUBPROCESS', 'false').lower() == 'true'
     cnc_python_path = os.getenv('CNC_PYTHON_EXECUTABLE', None)

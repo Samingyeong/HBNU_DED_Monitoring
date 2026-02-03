@@ -11,9 +11,11 @@ interface HeaderProps {
   emergency: boolean;
   onEmergencyToggle: (emergency: boolean) => void;
   folderName?: string;
+  operatorName?: string;
+  processName?: string;
 }
 
-const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderName }) => {
+const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderName, operatorName, processName }) => {
   const [isSavingLoading, setIsSavingLoading] = useState(false);
   const [saveFolderName, setSaveFolderName] = useState('');
   const [tempStorageInfo, setTempStorageInfo] = useState<any>(null);
@@ -167,10 +169,24 @@ const Header: React.FC<HeaderProps> = ({ emergency, onEmergencyToggle, folderNam
             })}
           </div>
           
-          {/* 폴더명 표시 (수정 불가) */}
-          {folderName && (
-            <div className="px-3 py-2 text-sm bg-blue-50 border border-blue-300 rounded-lg text-blue-700 font-medium">
-              {folderName}
+          {/* 작업자명 / 공정명 / 폴더명 표시 */}
+          {(operatorName || processName || folderName) && (
+            <div className="flex items-center gap-2">
+              {operatorName && (
+                <div className="px-3 py-2 text-sm bg-gray-100 border border-gray-300 rounded-lg text-gray-700 font-medium">
+                  작업자: {operatorName}
+                </div>
+              )}
+              {processName && (
+                <div className="px-3 py-2 text-sm bg-gray-100 border border-gray-300 rounded-lg text-gray-700 font-medium">
+                  공정: {processName}
+                </div>
+              )}
+              {folderName && (
+                <div className="px-3 py-2 text-sm bg-blue-50 border border-blue-300 rounded-lg text-blue-700 font-medium">
+                  {folderName}
+                </div>
+              )}
             </div>
           )}
 

@@ -40,8 +40,9 @@ class DataStorage:
         self.frame_id = 0
         self.last_hik_save = 0
         
-        # 데이터베이스 경로 설정
-        self.base_db_path = os.path.join(os.path.dirname(__file__), "..", "DB")
+        # 데이터 저장 기본 경로 (환경변수 SAVE_BASE_PATH 없으면 M250 기본 경로 사용)
+        _default_save_base = r"C:\장비 모니터링 데이터\DED\M250_AM Solutions"
+        self.base_db_path = os.environ.get("SAVE_BASE_PATH", _default_save_base)
         os.makedirs(self.base_db_path, exist_ok=True)
         
         # 이미지 저장 경로 설정

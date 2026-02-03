@@ -7,9 +7,23 @@ import threading
 from queue import Queue, Empty
 import os
 
+def _camera_error_hint(err: Exception) -> str:
+    """Basler 연결 실패 시 원인 안내 메시지 반환"""
+    msg = str(err)
+    if "exclusively opened by another client" in msg or "exclusively opened" in msg.lower():
+        return (
+            "Basler 카메라가 다른 프로그램에서 이미 사용 중입니다. "
+            "Pylon Viewer, DED 제어 프로그램 등 카메라를 사용하는 프로그램을 모두 종료한 뒤 다시 시도하세요."
+        )
+    if "No device" in msg or "no device" in msg.lower():
+        return "Basler 카메라가 연결되지 않았거나 전원/USB를 확인하세요."
+    return msg
+
+
 class CameraCommunication:
     def __init__(self):
         connected = False
+        last_error = None
         for i in range(3):
             try:
                 self.camera = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
@@ -19,11 +33,16 @@ class CameraCommunication:
                 connected = True
                 break
             except Exception as e:
-                print(f"Connection attempt {i+1} failed. Error: {e}")
+                last_error = e
+                hint = _camera_error_hint(e)
+                # 재시도 시 같은 메시지 반복 출력 방지: 마지막 시도에서만 안내
+                if i == 2:
+                    print(f"[Basler] 연결 실패: {hint}")
                 time.sleep(1)
 
         if not connected:
-            raise Exception("No device is available. Please check the camera connection.")
+            hint = _camera_error_hint(last_error) if last_error else "카메라 연결을 확인하세요."
+            raise Exception(hint)
 
         try:
             pf = self.camera.PixelFormat

@@ -191,6 +191,10 @@ class SensorManager:
             logger.info(f"연결된 센서: {', '.join(connected)}")
         if disconnected:
             logger.info(f"연결 안됨: {', '.join(disconnected)}")
+            logger.info(
+                "일부 센서 미연결 시: trouble_shooting_md/SENSOR_CONNECTION_ERRORS_KR.md 참고 "
+                "(Basler=다른 프로그램 종료, COM=포트 사용 중인 프로그램 확인, 레이저/CNC=전원·IP 확인)"
+            )
         
         logger.info("백그라운드 센서 연결 완료")
     
@@ -223,13 +227,13 @@ class SensorManager:
                     self.connection_status[sensor_type] = False
                     continue
                 
-                # 비동기로 연결 시도 (3초 타임아웃)
+                # 비동기로 연결 시도 (CNC는 HXApi 준비 지연으로 10초, 나머지 3초)
                 loop = asyncio.get_event_loop()
-                
+                timeout_sec = 10.0 if sensor_type == "cnc" else 3.0
                 try:
                     connected = await asyncio.wait_for(
                         loop.run_in_executor(None, sensor.connect),
-                        timeout=3.0
+                        timeout=timeout_sec
                     )
                     
                     if connected:

@@ -13,7 +13,7 @@ function App() {
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [showInitialSetup, setShowInitialSetup] = useState(true);
   const [operatorName, setOperatorName] = useState('');
-  
+  const [processName, setProcessName] = useState('');
   const [folderName, setFolderName] = useState('');
 
   const handleEmergencyToggle = (newEmergency: boolean) => {
@@ -36,24 +36,26 @@ function App() {
     setShowEmergencyModal(false);
   };
 
-  const handleInitialSetupComplete = (operator: string) => {
+  const handleInitialSetupComplete = (operator: string, process: string) => {
     setOperatorName(operator);
+    setProcessName(process);
     
-    // 폴더명 자동 생성: YYYYMMDD_HHMM_작업자명
+    // 폴더명 자동 생성: YYYYMMDD_HHMM_작업자명_공정명
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
     const hour = String(now.getHours()).padStart(2, '0');
     const minute = String(now.getMinutes()).padStart(2, '0');
-    
-    const generatedFolderName = `${year}${month}${day}_${hour}${minute}_${operator}`;
+    const suffix = process.trim() ? `${operator}_${process.trim()}` : operator;
+    const generatedFolderName = `${year}${month}${day}_${hour}${minute}_${suffix}`;
     setFolderName(generatedFolderName);
     
     setShowInitialSetup(false);
     
     console.log('설정 완료:', {
       operatorName: operator,
+      processName: process,
       folderName: generatedFolderName
     });
   };
@@ -65,6 +67,8 @@ function App() {
         emergency={emergency} 
         onEmergencyToggle={handleEmergencyToggle}
         folderName={folderName}
+        operatorName={operatorName}
+        processName={processName}
       />
       
       {/* Main Content */}
@@ -101,11 +105,6 @@ function App() {
             {/* 1행 - Melt Pool Area */}
             <div className="flex-1">
               <Charts chartType="meltpoolArea" />
-            </div>
-            
-            {/* 2행 - Height (CCD 카메라) */}
-            <div className="flex-1">
-              <Charts chartType="height" />
             </div>
             
             {/* 3행 - Temperature & Laser Power (2열로 나눔) */}
